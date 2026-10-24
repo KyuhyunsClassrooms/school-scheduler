@@ -1,0 +1,40 @@
+# Local credentials and deployment state
+.env
+.env.*
+!.env.example
+**/node_modules/
+**/.vercel/
+**/__pycache__/
+*.user
+*.suo
+*.pfx
+*.p12
+*.key
+
+# Generated binaries, downloaded dependencies and installers
+widget/bin/
+widget/lib/
+widget/tools/
+widget/installer/build/
+widget/installer/redist/
+dist/*
+!dist/배포안내.txt
+*.obj
+*.pdb
+*.exp
+*.lib
+
+# Local browser profiles, reverse-engineering output and old implementations
+widget/legacy-webview/
+widget/analysis/*
+!widget/analysis/NativeSmoke.cs
+!widget/analysis/FeedSmoke.cs
+!widget/analysis/Test-FeedInstaller.ps1
+/DesktopCal-분석.md
+/학사일정-스케줄러.html
+
+# User data belongs on each PC
+calendar-data.json*
+schedule-source.json*
+schedule-cache.json*
+widget.ini

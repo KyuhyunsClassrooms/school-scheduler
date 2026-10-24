@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "School Calendar Feed v1",
+  "type": "object",
+  "required": ["schemaVersion", "name", "revision", "updatedAt", "events"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "\\S" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "events": {
+      "type": "array", "maxItems": 10000,
+      "items": {
+        "type": "object", "required": ["id", "start", "end", "title"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+          "start": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "end": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S" },
+          "category": { "type": "string", "maxLength": 100, "default": "학교" },
+          "grades": { "type": "string", "maxLength": 100, "default": "전체" },
+          "note": { "type": "string", "maxLength": 20000, "default": "" }
+        }
+      }
+    }
+  }
+}

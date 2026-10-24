@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "예시학교 학사일정",
+  "revision": "example-v1",
+  "updatedAt": "2026-10-24T09:00:00+09:00",
+  "events": [
+    {"id":"meeting-001","start":"2026-10-26","end":"2026-10-26","title":"교직원 회의","category":"교직원","grades":"전체","note":"회의실"},
+    {"id":"exam-001","start":"2026-11-02","end":"2026-11-06","title":"평가 기간","category":"평가","grades":"1,2","note":"예시 데이터입니다."}
+  ]
+}
