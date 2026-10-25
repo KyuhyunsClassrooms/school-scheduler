@@ -1,4 +1,4 @@
-# 학사일정 바탕화면 달력 2.1
+# 학사일정 바탕화면 달력 2.2
 
 Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로세스, PNG 캡처를 실행 경로에서 제거했습니다. C# WinForms/GDI+가 투명 비트맵을 직접 그리고, C++ DLL이 Explorer 바탕화면에 합성하고 입력을 전달합니다. DesktopCal의 자체 `dkui.dll`을 사용하는 것은 아닙니다.
 
@@ -20,11 +20,13 @@ Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로
 ## 표시 구조
 
 1. x64 `WH_CALLWNDPROC` 훅으로 Explorer 바탕화면 ListView 스레드에 진입하고 `SetWindowSubclass`를 설치합니다. 훅 종류도 원본 DesktopCal과 같습니다.
-2. `CalendarRenderer`가 32비트 premultiplied BGRA 비트맵을 직접 만듭니다. 글자·날짜·일정·메모를 그리며, 크기나 내용이 바뀐 경우에만 공유 메모리에 게시합니다.
-3. Explorer의 `WM_PAINT`에서 바탕화면 배경과 아이콘을 메모리에 그리고, 아이콘과 이름 영역을 제외해 달력을 `AlphaBlend`합니다. 완성된 화면을 한 번에 표시합니다.
+2. `CalendarRenderer`가 32비트 premultiplied BGRA 비트맵을 재사용합니다. 내용이 바뀌면 전체를 그리고, 마우스 이동은 이전·현재 날짜 테두리만 고칩니다. 위치만 바뀌면 픽셀을 복사하지 않습니다.
+3. Explorer의 `WM_PAINT`에서 손상 영역 크기의 임시 버퍼에 바탕화면 배경·아이콘·달력을 합성합니다. 아이콘과 이름 영역을 제외하고 완성된 화면을 한 번에 표시합니다. 사용하지 않는 큰 합성 버퍼는 축소합니다.
 4. ListView가 받은 마우스 입력을 앱의 날짜·버튼·드래그 처리에 전달합니다. 달력 전체를 편집용 창으로 바꾸지 않습니다. 메모를 입력하는 날짜 칸만 네이티브 입력창으로 표시합니다.
 5. Per Monitor V2와 픽셀 단위 레이아웃을 사용합니다. 글자 크기는 픽셀로 지정하며, DPI 메시지 때문에 달력 자체의 크기를 바꾸지 않습니다.
 6. 종료 시 훅과 서브클래스를 해제합니다. Explorer가 다시 시작되면 다시 연결합니다. 앱이 비정상 종료되면 Explorer의 감시 타이머가 그림과 서브클래스를 정리합니다.
+7. v4 공유 메모리는 256바이트 헤더와 프레임을 사용합니다. 최대 64MiB 주소 공간을 예약하지만 실제 페이지는 필요한 프레임 크기만큼만 commit합니다. 변경 영역만 전송하며 수신 sequence가 건너뛰면 전체 복사로 복구합니다.
+8. 월간 일정·할 일 조회 결과를 캐시합니다. 데이터·필터·월이 바뀔 때만 갱신하며, 숨긴 달력은 다시 보일 때 최신 내용을 그립니다. 같은 서버 게시 버전은 파일 저장과 달력 재그리기를 생략합니다.
 
 원본은 x86 자체 UI와 x64 도우미를 사용합니다. 이 앱은 x64 WinForms/GDI+와 공유 메모리를 사용하므로 렌더러와 IPC는 원본과 다릅니다. 원본 디컴파일 근거는 `analysis/original-functions.txt` 및 상위 `DesktopCal-분석.md`에 있습니다.
 
@@ -45,7 +47,7 @@ Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로
 
 앱은 Windows x64와 .NET Framework 4.7.2 이상에서 동작합니다. 네이티브 DLL 빌드에는 `build-native.cmd`에 지정한 Visual Studio 2022 Build Tools의 MSVC x64 도구가 필요합니다. C++ 런타임은 정적으로 연결합니다.
 
-`build-installer.cmd` 또는 `./build-installer.ps1`을 실행하면 `dist/SchoolScheduler-2.1.0-x64-Setup.exe`와 SHA-256 파일을 만듭니다. `-SkipBuild`는 현재 바이너리로 패키지만 다시 만듭니다. 버전은 실행 파일에서 읽습니다.
+`build-installer.cmd` 또는 `./build-installer.ps1`을 실행하면 `dist/SchoolScheduler-2.2.0-x64-Setup.exe`와 SHA-256 파일을 만듭니다. `-SkipBuild`는 현재 바이너리로 패키지만 다시 만듭니다. 버전은 실행 파일에서 읽습니다.
 
 - Intel·AMD x64 Windows 10 1809 이상 / Windows 11. ARM64는 현재 Explorer DLL 패키지의 대상이 아닙니다.
 - 기본 설치 경로는 `%LOCALAPPDATA%\Programs\SchoolScheduler`이며 관리자 권한을 요청하지 않습니다.
@@ -61,6 +63,7 @@ Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로
 `analysis/NativeSmoke.cs`는 실제 Explorer 훅과 네이티브 화면을 함께 검사합니다. 원본 자료 127건, WebView 참조 없음, 투명 픽셀 형식, 첫 클릭, 날짜 칸과 편집창 좌표 일치, Windows EDIT 문자 입력, 저장·취소, JSON 왕복·기존 백업 합치기, 이동·크기 조절, DPI 메시지, 유휴 시 재그리기 없음 등을 검사합니다.
 
 - 현재 기능 검사: `analysis/native-smoke/result.txt`.
+- 성능 비교: `analysis/Run-PerformanceProbe.ps1` 및 상위 `docs/PERFORMANCE.md`. 벤치마크는 앱을 종료하고 `widget` 폴더에서 실행합니다.
 - 서버 연결/캐시/읽기 토큰/삭제 반영 검사: `analysis/FeedSmoke.cs`, `analysis/feed-smoke/*/result.txt`.
 - 서버 SQL·권한·게시 검사: `../schedule-server/tests/server.test.mjs` (`npm test`). 실제 Supabase 배포는 별도 확인이 필요합니다.
 - 2.0 설치·1.2에서 업데이트·제거 검사: `analysis/native-installer-smoke/result.json`. 최신 설치 검사는 `analysis/feed-installer-smoke/`.

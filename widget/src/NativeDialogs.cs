@@ -189,7 +189,7 @@ namespace SchoolWidget
         public void SelectDate(DateTime day){date.Value=day.Date;RefreshLists();}
         void RefreshLists()
         {
-            if(IsDisposed)return;updating=true;
+            if(IsDisposed)return;updating=true;events.BeginUpdate();todos.BeginUpdate();
             try{
                 events.Items.Clear();todos.Items.Clear();
                 foreach(var entry in store.Entries(date.Value.Date)){
@@ -198,7 +198,7 @@ namespace SchoolWidget
                 foreach(var todo in store.Data.todos.OrderBy(x=>x.done).ThenBy(x=>x.due??"9999")){
                     var item=new ListViewItem(new[]{todo.due??"기한 없음",(todo.important?"★ ":"")+todo.title}){Tag=todo,Checked=todo.done};todos.Items.Add(item);
                 }
-            }finally{updating=false;}
+            }finally{events.EndUpdate();todos.EndUpdate();updating=false;}
         }
         void OpenSelection()
         {

@@ -54,6 +54,12 @@ namespace SchoolWidget
         public CalendarDocument Data { get; private set; }
         public readonly List<SchoolEvent> School;
         public event Action Changed;
+        int dataVersion;
+        CalendarMonthView monthView;
+        List<TodoItem> todoView;
+        int monthVersion=-1,todoVersion=-1,monthGrade;
+        bool monthShowDone,todoShowDone;
+        string todoFilter,todoToday;
 
         public CalendarStore(string path)
         {
@@ -65,6 +71,7 @@ namespace SchoolWidget
         public void ReplaceSchool(IEnumerable<SchoolEvent> events)
         {
             School.Clear(); School.AddRange(events);
+            ++dataVersion;
             if (Changed != null) Changed();
         }
         public static string DateKey(DateTime day) { return day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
@@ -118,6 +125,7 @@ namespace SchoolWidget
             File.WriteAllText(temp, Json.Serialize(Data), new UTF8Encoding(false));
             if (File.Exists(FilePath)) File.Replace(temp, FilePath, FilePath + ".bak", true);
             else File.Move(temp, FilePath);
+            ++dataVersion;
             if (Changed != null) Changed();
         }
         public void Import(string text)
@@ -151,7 +159,6 @@ namespace SchoolWidget
         public List<CalendarEntry> Entries(DateTime day)
         {
             string key = DateKey(day);
-            bool weekend = day.DayOfWeek == DayOfWeek.Saturday || day.DayOfWeek == DayOfWeek.Sunday;
             string grade = Data.prefs.grade.ToString(CultureInfo.InvariantCulture);
             var result = new List<CalendarEntry>();
             foreach (var e in School)
@@ -169,6 +176,66 @@ namespace SchoolWidget
             string key = DateKey(day);
             return Data.todos.Where(t => t.due == key && (!t.done || Data.prefs.showDone))
                 .OrderBy(t => t.done).ThenByDescending(t => t.important).ToList();
+        }
+        public List<TodoItem> VisibleTodos()
+        {
+            string today=DateKey(DateTime.Today),filter=Data.prefs.todoFilter;
+            if(todoView==null||todoVersion!=dataVersion||todoFilter!=filter||todoToday!=today||todoShowDone!=Data.prefs.showDone)
+            {
+                todoView=Data.todos.Where(t=>(!t.done||Data.prefs.showDone)&&
+                    (filter!="today"||!string.IsNullOrEmpty(t.due)&&string.CompareOrdinal(t.due,today)<=0)&&
+                    (filter!="important"||t.important)).OrderBy(t=>t.done).ThenByDescending(t=>t.important)
+                    .ThenBy(t=>string.IsNullOrEmpty(t.due)?"9999":t.due,StringComparer.Ordinal).ThenBy(t=>t.created).ToList();
+                todoVersion=dataVersion;todoFilter=filter;todoToday=today;todoShowDone=Data.prefs.showDone;
+            }
+            return todoView;
+        }
+        public CalendarMonthView View(DateTime first)
+        {
+            if(monthView!=null&&monthView.First==first&&monthVersion==dataVersion&&monthGrade==Data.prefs.grade&&monthShowDone==Data.prefs.showDone)return monthView;
+            var view=new CalendarMonthView(first);
+            string firstKey=DateKey(first),lastKey=DateKey(first.AddDays(41));
+            string grade=Data.prefs.grade.ToString(CultureInfo.InvariantCulture);
+            foreach(var e in School)
+            {
+                if(string.CompareOrdinal(e.e,firstKey)<0||string.CompareOrdinal(e.s,lastKey)>0)continue;
+                if(Data.prefs.grade!=0&&e.g!="전체"&&!(e.g??"").Split(',').Contains(grade))continue;
+                DateTime start=Date(e.s),end=Date(e.e);
+                view.Add(new CalendarEntry{Id=e.id,Title=e.t,Category=e.c,Note=e.n,Grades=e.g,Start=start,End=end});
+            }
+            foreach(var p in Data.personal)
+            {
+                if(string.CompareOrdinal(p.end,firstKey)<0||string.CompareOrdinal(p.start,lastKey)>0)continue;
+                DateTime start=Date(p.start),end=Date(p.end);
+                view.Add(new CalendarEntry{Id=p.id,Title=p.title,Category="개인",Note=p.note,Grades="전체",Start=start,End=end,Personal=p});
+            }
+            foreach(var t in Data.todos)
+            {
+                if(string.IsNullOrEmpty(t.due)||t.done&&!Data.prefs.showDone)continue;
+                int index=(Date(t.due)-first).Days;if(index>=0&&index<42)view.Todos[index].Add(t);
+            }
+            for(int i=0;i<42;i++)
+            {
+                view.Entries[i]=view.Entries[i].OrderBy(e=>e.Category=="수업 변경"?0:e.Category=="휴업·공휴일"?1:e.IsPersonal?3:2).ThenBy(e=>e.Title,StringComparer.CurrentCulture).ToList();
+                view.Todos[i]=view.Todos[i].OrderBy(t=>t.done).ThenByDescending(t=>t.important).ToList();
+            }
+            monthView=view;monthVersion=dataVersion;monthGrade=Data.prefs.grade;monthShowDone=Data.prefs.showDone;
+            return view;
+        }
+    }
+    public sealed class CalendarMonthView
+    {
+        public readonly DateTime First;
+        public readonly List<CalendarEntry>[] Entries=new List<CalendarEntry>[42];
+        public readonly List<TodoItem>[] Todos=new List<TodoItem>[42];
+        public CalendarMonthView(DateTime first)
+        {
+            First=first;for(int i=0;i<42;i++){Entries[i]=new List<CalendarEntry>();Todos[i]=new List<TodoItem>();}
+        }
+        public void Add(CalendarEntry entry)
+        {
+            int from=Math.Max(0,(entry.Start-First).Days),to=Math.Min(41,(entry.End-First).Days);
+            for(int i=from;i<=to;i++)Entries[i].Add(entry);
         }
     }
 }

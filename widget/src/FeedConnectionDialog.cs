@@ -14,7 +14,7 @@ namespace SchoolWidget
             Text="학교 일정 연결";Font=new Font("Malgun Gothic",9f);ClientSize=new Size(530,365);
             FormBorderStyle=FormBorderStyle.FixedDialog;StartPosition=FormStartPosition.CenterScreen;
             MaximizeBox=false;MinimizeBox=false;ShowInTaskbar=false;
-            var intro=new Label{Left=20,Top=18,Width=490,Height=42,Text="학교에서 안내받은 일정 JSON 주소를 입력하세요.\n어느 서버든 공통 일정 규격을 제공하면 연결할 수 있습니다."};
+            var intro=new Label{Left=20,Top=18,Width=490,Height=42,Text="학교에서 안내받은 일정 연결 주소를 입력하세요.\n연결한 학교의 최신 일정을 자동으로 받아옵니다."};
             var url=new TextBox{Left=20,Top=89,Width=490,Text=feed.Url,MaxLength=2048};
             var token=new TextBox{Left=20,Top=153,Width=490,UseSystemPasswordChar=true,MaxLength=4096};
             try{token.Text=feed.GetToken();}catch(Exception){}
@@ -24,7 +24,7 @@ namespace SchoolWidget
             var disconnect=new Button{Left=266,Top=282,Width=100,Height=30,Text="연결 해제"};
             var import=new Button{Left=20,Top=323,Width=180,Text="로컬 일정 JSON 가져오기"};
             var close=new Button{Left=410,Top=323,Width=100,Text="닫기",DialogResult=DialogResult.Cancel};
-            Controls.AddRange(new Control[]{intro,new Label{Left=20,Top=66,Width=250,Text="일정 JSON 주소 (HTTPS)"},url,
+            Controls.AddRange(new Control[]{intro,new Label{Left=20,Top=66,Width=250,Text="일정 연결 주소 (HTTPS)"},url,
                 new Label{Left=20,Top=130,Width=460,Text="읽기 토큰 (학교에서 안내한 경우에만 입력)"},token,state,connect,refresh,disconnect,import,close});
             Action<bool> busy=value=>{working=value;connect.Enabled=refresh.Enabled=disconnect.Enabled=import.Enabled=close.Enabled=!value;url.Enabled=token.Enabled=!value;};
             connect.Click+=async(s,e)=>{

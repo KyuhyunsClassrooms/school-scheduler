@@ -159,8 +159,7 @@ namespace SchoolWidget
             {
                 var feed=await DownloadAsync(settings,lifetime.Token);
                 if(disposed||request!=generation)return;
-                WriteCache(feed,settings);
-                if(feed.revision!=Revision||feed.name!=Name)Apply(feed);
+                if(feed.revision!=Revision||feed.name!=Name){WriteCache(feed,settings);Apply(feed);}
                 Status="동기화 완료 · "+DateTime.Now.ToString("HH:mm");
             }
             catch(OperationCanceledException){if(!disposed)Status="응답 시간 초과 · 저장된 일정 사용";}

@@ -68,11 +68,7 @@ namespace SchoolWidget
     {
         public static List<TodoItem> VisibleTodos(CalendarStore store)
         {
-            string today=CalendarStore.DateKey(DateTime.Today),filter=store.Data.prefs.todoFilter;
-            return store.Data.todos.Where(t=>(!t.done||store.Data.prefs.showDone)&&
-                (filter!="today"||!string.IsNullOrEmpty(t.due)&&string.CompareOrdinal(t.due,today)<=0)&&
-                (filter!="important"||t.important)).OrderBy(t=>t.done).ThenByDescending(t=>t.important)
-                .ThenBy(t=>string.IsNullOrEmpty(t.due)?"9999":t.due,StringComparer.Ordinal).ThenBy(t=>t.created).ToList();
+            return store.VisibleTodos();
         }
         public static Color CategoryColor(string category)
         {
@@ -104,6 +100,11 @@ namespace SchoolWidget
         public static Bitmap Render(CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset=0, string source="일정 서버 연결")
         {
             var image = new Bitmap(layout.Size.Width, layout.Size.Height, PixelFormat.Format32bppPArgb);
+            Draw(image,store,cfg,layout,selected,hover,todoOffset,source);
+            return image;
+        }
+        public static void Draw(Bitmap image, CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset, string source)
+        {
             using (var g = Graphics.FromImage(image))
             using (var body = new Font("Malgun Gothic", cfg.FontSize, FontStyle.Regular, GraphicsUnit.Pixel))
             using (var bold = new Font("Malgun Gothic", cfg.FontSize, FontStyle.Bold, GraphicsUnit.Pixel))
@@ -128,6 +129,7 @@ namespace SchoolWidget
                         new Rectangle(cell.X, 39, cell.Width, 22), true, false);
                 }
                 int line = Math.Max(15, cfg.FontSize + 5);
+                var snapshot=store.View(layout.First);
                 for (int i = 0; i < 42; i++)
                 {
                     DateTime day = layout.First.AddDays(i);
@@ -138,8 +140,7 @@ namespace SchoolWidget
                     int alpha = outside ? cfg.CellAlpha * 2 / 3 : cfg.CellAlpha;
                     Color fillColor = day == selected.Date ? Color.FromArgb(Math.Min(220, alpha + 45), 32, 86, 82) : Color.FromArgb(alpha, 20, 29, 37);
                     using (var fill = new SolidBrush(fillColor)) g.FillRectangle(fill, cell);
-                    using (var pen = new Pen(Color.FromArgb(i == hover ? 170 : 45, 235, 245, 250)))
-                        g.DrawRectangle(pen, cell.X, cell.Y, cell.Width - 1, cell.Height - 1);
+                    Border(g,cell,i==hover);
                     Color number = day.DayOfWeek == DayOfWeek.Sunday ? CategoryColor("휴업·공휴일") : day.DayOfWeek == DayOfWeek.Saturday ? CategoryColor("교직원") : Color.White;
                     if (outside) number = Color.FromArgb(155, number);
                     if (day.Date == DateTime.Today)
@@ -147,8 +148,8 @@ namespace SchoolWidget
                         using (var mark = new SolidBrush(Color.FromArgb(230, 23, 135, 120))) g.FillEllipse(mark, cell.X + 5, cell.Y + 4, 25, 23);
                     }
                     Text(g, day.Day.ToString(), bold, number, new Rectangle(cell.X + 6, cell.Y + 5, cell.Width - 12, line + 3), false, false);
-                    var entries = store.Entries(day);
-                    var todos = store.Todos(day);
+                    var entries = snapshot.Entries[i];
+                    var todos = snapshot.Todos[i];
                     int top = cell.Y + line + 12;
                     int shown = Math.Min(entries.Count, Math.Max(0, Math.Min(3, (cell.Height - line - 20) / (line + 4))));
                     for (int n = 0; n < shown; n++)
@@ -197,7 +198,22 @@ namespace SchoolWidget
                 Button(g,"‹",body,layout.TodoPrevious,false);Button(g,"›",body,layout.TodoNext,false);
                 Button(g,source,body,layout.Source,false);
             }
-            return image;
+        }
+        static void Border(Graphics g,Rectangle cell,bool highlighted)
+        {
+            var state=g.Save();g.SmoothingMode=SmoothingMode.None;g.CompositingMode=CompositingMode.SourceCopy;
+            using(var pen=new Pen(Color.FromArgb(highlighted?170:45,235,245,250)))g.DrawRectangle(pen,cell.X,cell.Y,cell.Width-1,cell.Height-1);
+            g.Restore(state);
+        }
+        public static Rectangle UpdateHover(Bitmap image,CalendarLayout layout,int previous,int current)
+        {
+            Rectangle damage=Rectangle.Empty;
+            using(var g=Graphics.FromImage(image))
+            {
+                if(previous>=0&&previous<42){var cell=layout.Cell(previous);Border(g,cell,false);damage=cell;}
+                if(current>=0&&current<42){var cell=layout.Cell(current);Border(g,cell,true);damage=damage.IsEmpty?cell:Rectangle.Union(damage,cell);}
+            }
+            return damage;
         }
         static void Button(Graphics g,string text,Font font,Rectangle rect,bool active)
         {

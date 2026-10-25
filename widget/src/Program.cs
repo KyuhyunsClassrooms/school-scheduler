@@ -14,8 +14,8 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("학사일정 위젯")]
 [assembly: System.Reflection.AssemblyProduct("학사일정 위젯")]
-[assembly: System.Reflection.AssemblyVersion("2.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.0.0")]
 
 namespace SchoolWidget
 {
@@ -225,7 +225,7 @@ namespace SchoolWidget
     // 훅 해제 시 Explorer는 원래 그리기로 돌아간다.
     sealed class DockBridge : IDisposable
     {
-        const int MapBytes = 64 * 1024 * 1024, HeaderBytes = 128;
+        const int MapBytes = 64 * 1024 * 1024, HeaderBytes = 256;
         const int HookType = 4, PageReadWrite = 4, FileMapWrite = 2;
         const int Magic = 0x4B434F44;
         readonly Mutex gate = new Mutex(false, @"Local\SchoolSchedulerDockMutex.v1");
@@ -234,7 +234,8 @@ namespace SchoolWidget
         int stopMessage;
         int hitTestMessage;
         int frameOpacity = 255;
-        byte[] previousPixels;
+        Size previousSize;
+        int committedBytes;
         Rectangle previousBounds;
         int previousOpacity;
         bool shown = true;
@@ -251,6 +252,10 @@ namespace SchoolWidget
         static extern IntPtr MapViewOfFile(IntPtr mapping, int access, int offHigh, int offLow, int bytes);
         [DllImport("kernel32.dll")] static extern bool UnmapViewOfFile(IntPtr p);
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr VirtualAlloc(IntPtr address, UIntPtr size, uint allocationType, uint protection);
+        [DllImport("kernel32.dll", EntryPoint="RtlMoveMemory")]
+        static extern void CopyMemory(IntPtr destination, IntPtr source, UIntPtr size);
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern IntPtr SetWindowsHookEx(int kind, IntPtr callback, IntPtr module, uint thread);
         [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
@@ -266,11 +271,12 @@ namespace SchoolWidget
             if (list == IntPtr.Zero) { Error = "바탕화면 아이콘 창을 찾을 수 없습니다."; return false; }
             string dll = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "SchoolDockHook.dll");
             if (!File.Exists(dll)) { Error = "SchoolDockHook.dll이 없습니다. build.cmd를 다시 실행하세요."; return false; }
-            mapping = CreateFileMapping(new IntPtr(-1), IntPtr.Zero, PageReadWrite, 0, MapBytes,
-                @"Local\SchoolSchedulerDockFrame.v3");
+            mapping = CreateFileMapping(new IntPtr(-1), IntPtr.Zero, PageReadWrite | 0x4000000 /* SEC_RESERVE */, 0, MapBytes,
+                @"Local\SchoolSchedulerDockFrame.v4");
             if (mapping == IntPtr.Zero) { Error = "공유 메모리를 만들지 못했습니다."; Stop(); return false; }
             view = MapViewOfFile(mapping, FileMapWrite, 0, 0, MapBytes);
             if (view == IntPtr.Zero) { Error = "공유 메모리에 접근하지 못했습니다."; Stop(); return false; }
+            if (!Commit(HeaderBytes)) { Error = "공유 메모리를 할당하지 못했습니다."; Stop(); return false; }
             Marshal.Copy(new byte[HeaderBytes], 0, view, HeaderBytes);
             module = LoadLibrary(dll);
             if (module == IntPtr.Zero) { Error = "Explorer 훅 DLL을 불러오지 못했습니다."; Stop(); return false; }
@@ -294,37 +300,58 @@ namespace SchoolWidget
 
         void WriteHeader(int x, int y, int dw, int dh, int w, int h, int opacity)
         {
-            int[] values = { Magic, 1, ++sequence, x, y, dw, dh, w, h, w * 4, opacity };
+            int[] values = { Magic, 2, ++sequence, x, y, dw, dh, w, h, w * 4, opacity };
             for (int i = 0; i < values.Length; i++) Marshal.WriteInt32(view, i * 4, values[i]);
             Marshal.WriteInt32(view, 80, unchecked((int)list.ToInt64()));
         }
 
-        public void Publish(Bitmap image, Rectangle bounds, int opacity)
+        bool Commit(int bytes)
+        {
+            int page = Environment.SystemPageSize;
+            int rounded = (bytes + page - 1) / page * page;
+            if (rounded <= committedBytes) return true;
+            if (VirtualAlloc(view, new UIntPtr((uint)rounded), 0x1000 /* MEM_COMMIT */, PageReadWrite) == IntPtr.Zero) return false;
+            committedBytes = rounded;
+            Marshal.WriteInt64(view, 160, committedBytes);
+            return true;
+        }
+        void WriteDamage(Rectangle dirty)
+        {
+            Marshal.WriteInt32(view,128,dirty.X);Marshal.WriteInt32(view,132,dirty.Y);
+            Marshal.WriteInt32(view,136,dirty.Width);Marshal.WriteInt32(view,140,dirty.Height);
+        }
+        public void Publish(Bitmap image, Rectangle bounds, int opacity, Rectangle? changed = null)
         {
             if (!Attached || view == IntPtr.Zero || image == null) return;
             int w = image.Width, h = image.Height;
             if (w < 1 || h < 1 || w > 4096 || h > 4096 || (long)w * h * 4 > MapBytes - HeaderBytes) return;
-            byte[] pixels = new byte[w * h * 4];
-            var data = image.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-            try
-            {
-                for (int y = 0; y < h; y++)
-                    Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), pixels, y * w * 4, w * 4);
-            }
-            finally { image.UnlockBits(data); }
-            bool same = previousPixels != null && previousPixels.Length == pixels.Length &&
-                previousBounds == bounds && previousOpacity == opacity;
-            if (same)
-                for (int i = 0; i < pixels.Length; i++)
-                    if (pixels[i] != previousPixels[i]) { same = false; break; }
-            if (same) return;
+            var whole = new Rectangle(0,0,w,h);
+            Rectangle dirty = previousSize != image.Size ? whole : Rectangle.Intersect(changed ?? whole, whole);
+            if (dirty.IsEmpty && previousBounds == bounds && previousOpacity == opacity) return;
             bool locked = false;
             try
             {
                 locked = gate.WaitOne(200);
                 if (!locked) return;
-                Marshal.Copy(pixels, 0, IntPtr.Add(view, HeaderBytes), pixels.Length);
-                previousPixels = pixels;
+                if (!Commit(HeaderBytes + w*h*4)) throw new OutOfMemoryException("달력 공유 메모리를 할당하지 못했습니다.");
+                if (!dirty.IsEmpty)
+                {
+                    var data = image.LockBits(dirty, ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+                    try
+                    {
+                        IntPtr destination = IntPtr.Add(view,HeaderBytes+(dirty.Y*w+dirty.X)*4);
+                        if (dirty.Width == w && data.Stride == w*4)
+                            CopyMemory(destination,data.Scan0,new UIntPtr((uint)(dirty.Width*dirty.Height*4)));
+                        else for(int row=0;row<dirty.Height;row++)
+                            CopyMemory(IntPtr.Add(destination,row*w*4),IntPtr.Add(data.Scan0,row*data.Stride),new UIntPtr((uint)(dirty.Width*4)));
+                    }
+                    finally { image.UnlockBits(data); }
+                    Marshal.WriteInt64(view,152,Marshal.ReadInt64(view,152)+(long)dirty.Width*dirty.Height*4);
+                    int counter = dirty==whole ? 168 : 172;
+                    Marshal.WriteInt32(view,counter,Marshal.ReadInt32(view,counter)+1);
+                }
+                WriteDamage(dirty);
+                previousSize = image.Size;
                 previousBounds = bounds;
                 previousOpacity = opacity;
                 frameOpacity = opacity;
@@ -346,6 +373,7 @@ namespace SchoolWidget
                 if (!locked) return;
                 Marshal.WriteInt32(view, 8, ++sequence);
                 Marshal.WriteInt32(view, 40, visible ? frameOpacity : 0);
+                WriteDamage(Rectangle.Empty);
             }
             catch (AbandonedMutexException) { locked = true; }
             finally { if (locked) gate.ReleaseMutex(); }
@@ -423,7 +451,9 @@ namespace SchoolWidget
             if (module != IntPtr.Zero) { FreeLibrary(module); module = IntPtr.Zero; }
             list = IntPtr.Zero;
             shown = true;
-            previousPixels = null;
+            previousSize = Size.Empty;
+            previousBounds = Rectangle.Empty;
+            committedBytes = 0;
         }
 
         public void Dispose() { Stop(); gate.Dispose(); }

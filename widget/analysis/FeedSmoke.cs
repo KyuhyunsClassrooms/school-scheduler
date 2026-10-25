@@ -33,6 +33,8 @@ namespace SchoolWidget
                 using(var restart=new FeedSync(new CalendarStore(store.FilePath)))Check(restart.Name==null,"new install does not acquire a bundled school after restart");
                 await Mode("first");await sync.ConnectAsync("http://127.0.0.1:3101/feed","");
                 Check(store.School.Count==2&&store.Entries(new DateTime(2026,10,24)).Count==1,"valid HTTP snapshot includes weekend events");
+                var cachedAt=File.GetLastWriteTimeUtc(Path.Combine(root,"schedule-cache.json"));int changes=0;store.Changed+=()=>++changes;
+                await sync.RefreshAsync();Check(changes==0&&File.GetLastWriteTimeUtc(Path.Combine(root,"schedule-cache.json"))==cachedAt,"unchanged revision performs no cache write or data invalidation");
                 await Mode("changed");await sync.RefreshAsync();
                 Check(store.School.Count==1&&store.School[0].t=="수정된 일정","refresh replaces edits and removes deleted events");
                 Check(store.Data.todos.Count==1&&store.Memo(new DateTime(2026,10,24))=="내 메모","sync preserves personal todos and memos");

@@ -30,6 +30,8 @@ widget/analysis/*
 !widget/analysis/NativeSmoke.cs
 !widget/analysis/FeedSmoke.cs
 !widget/analysis/Test-FeedInstaller.ps1
+!widget/analysis/PerformanceProbe.cs
+!widget/analysis/Run-PerformanceProbe.ps1
 /DesktopCal-분석.md
 /학사일정-스케줄러.html
 

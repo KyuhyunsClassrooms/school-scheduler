@@ -6,10 +6,10 @@
 #include <stdint.h>
 
 namespace {
-constexpr wchar_t kMapping[] = L"Local\\SchoolSchedulerDockFrame.v3";
+constexpr wchar_t kMapping[] = L"Local\\SchoolSchedulerDockFrame.v4";
 constexpr wchar_t kMutex[] = L"Local\\SchoolSchedulerDockMutex.v1";
 constexpr UINT_PTR kSubclass = 0x5343444B;
-constexpr size_t kHeaderBytes = 128;
+constexpr size_t kHeaderBytes = 256;
 struct FrameHeader {
     uint32_t magic, version, sequence;
     int32_t x, y, destWidth, destHeight, width, height, stride, opacity;
@@ -22,6 +22,7 @@ HGDIOBJ previousFrame = nullptr, previousBuffer = nullptr;
 BYTE* framePixels = nullptr;
 FrameHeader frame = {};
 uint32_t loadedSequence = 0;
+RECT frameDamage = {};
 UINT refreshMessage = 0, stopMessage = 0, hitTestMessage = 0, inputMessage = 0;
 HWND desktop = nullptr;
 int bufferWidth = 0, bufferHeight = 0;
@@ -57,6 +58,7 @@ void Cleanup() {
     if (mapped) { UnmapViewOfFile(mapped); mapped = nullptr; }
     if (mapping) { CloseHandle(mapping); mapping = nullptr; }
     if (mutexHandle) { CloseHandle(mutexHandle); mutexHandle = nullptr; }
+    frame = {}; loadedSequence = 0; bufferWidth = bufferHeight = 0; frameDamage = {};
 }
 RECT FrameRect(HWND h) {
     POINT p = { frame.x, frame.y };
@@ -68,11 +70,13 @@ void LoadFrame() {
     DWORD wait = WaitForSingleObject(mutexHandle, 0);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) return;
     const FrameHeader incoming = *reinterpret_cast<const FrameHeader*>(mapped);
-    if (incoming.magic == 0x4B434F44 && incoming.version == 1 && incoming.sequence != loadedSequence &&
+    frameDamage = {};
+    if (incoming.magic == 0x4B434F44 && incoming.version == 2 && incoming.sequence != loadedSequence &&
         incoming.width > 0 && incoming.height > 0 && incoming.width <= 4096 && incoming.height <= 4096 &&
         static_cast<uint64_t>(incoming.width) * incoming.height * 4 <= 64 * 1024 * 1024 - kHeaderBytes &&
         incoming.stride == incoming.width * 4 && incoming.destWidth > 0 && incoming.destHeight > 0 &&
         incoming.opacity >= 0 && incoming.opacity <= 255) {
+        bool fullCopy = !frameBitmap || frame.width != incoming.width || frame.height != incoming.height || incoming.sequence != loadedSequence + 1;
         if (!frameBitmap || frame.width != incoming.width || frame.height != incoming.height) {
             DeleteSurface(frameDc, frameBitmap, previousFrame);
             frameDc = CreateCompatibleDC(nullptr);
@@ -88,7 +92,27 @@ void LoadFrame() {
             if (frameBitmap) previousFrame = SelectObject(frameDc, frameBitmap);
         }
         if (frameBitmap) {
-            CopyMemory(framePixels, mapped + kHeaderBytes, static_cast<size_t>(incoming.stride) * incoming.height);
+            RECT dirty = { *reinterpret_cast<LONG*>(mapped + 128), *reinterpret_cast<LONG*>(mapped + 132), 0, 0 };
+            const int width = *reinterpret_cast<LONG*>(mapped + 136), height = *reinterpret_cast<LONG*>(mapped + 140);
+            if (dirty.left < 0 || dirty.top < 0 || width < 0 || height < 0 ||
+                dirty.left > incoming.width || dirty.top > incoming.height ||
+                width > incoming.width - dirty.left || height > incoming.height - dirty.top) fullCopy = true;
+            dirty.right = dirty.left + (fullCopy ? 0 : width); dirty.bottom = dirty.top + (fullCopy ? 0 : height);
+            if (fullCopy) dirty = { 0,0,incoming.width,incoming.height };
+            const size_t rowBytes = static_cast<size_t>(dirty.right - dirty.left) * 4;
+            if (rowBytes && dirty.bottom > dirty.top) {
+                if (dirty.left == 0 && dirty.right == incoming.width)
+                    CopyMemory(framePixels + static_cast<size_t>(dirty.top) * incoming.stride,
+                        mapped + kHeaderBytes + static_cast<size_t>(dirty.top) * incoming.stride,
+                        rowBytes * (dirty.bottom - dirty.top));
+                else for (int row = dirty.top; row < dirty.bottom; ++row) {
+                    const size_t offset = static_cast<size_t>(row) * incoming.stride + dirty.left * 4;
+                    CopyMemory(framePixels + offset, mapped + kHeaderBytes + offset, rowBytes);
+                }
+                *reinterpret_cast<uint64_t*>(mapped + 176) += rowBytes * (dirty.bottom - dirty.top);
+                Count(dirty.left==0&&dirty.top==0&&dirty.right==incoming.width&&dirty.bottom==incoming.height ? 184 : 188);
+            }
+            frameDamage = dirty;
             frame = incoming;
             loadedSequence = incoming.sequence;
             *reinterpret_cast<LONG*>(mapped + 92) = 6;
@@ -159,12 +183,16 @@ void CompositeFrame(HWND h, HDC dc) {
     if (saved) RestoreDC(dc, saved);
 }
 bool EnsureBuffer(HDC dc, int width, int height) {
-    if (bufferBitmap && bufferWidth == width && bufferHeight == height) return true;
+    width = (width + 63) / 64 * 64; height = (height + 63) / 64 * 64;
+    const uint64_t required = static_cast<uint64_t>(width) * height;
+    if (bufferBitmap && bufferWidth >= width && bufferHeight >= height &&
+        static_cast<uint64_t>(bufferWidth) * bufferHeight <= required * 4) return true;
     DeleteSurface(bufferDc, bufferBitmap, previousBuffer);
     bufferWidth = width; bufferHeight = height;
     bufferDc = CreateCompatibleDC(dc);
     if (bufferDc) bufferBitmap = CreateCompatibleBitmap(dc, width, height);
     if (bufferBitmap) previousBuffer = SelectObject(bufferDc, bufferBitmap);
+    if (mapped) *reinterpret_cast<uint64_t*>(mapped + 192) = static_cast<uint64_t>(width) * height * 4;
     return bufferBitmap != nullptr;
 }
 LRESULT CALLBACK DesktopProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
@@ -201,12 +229,17 @@ LRESULT CALLBACK DesktopProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, D
     }
     if (msg == refreshMessage) {
         RECT old = FrameRect(h);
+        const int previousOpacity = frame.opacity;
         LoadFrame();
         RECT current = FrameRect(h), damage;
-        UnionRect(&damage, &old, &current);
+        if (!EqualRect(&old,&current) || previousOpacity != frame.opacity) UnionRect(&damage, &old, &current);
+        else {
+            damage = frameDamage;
+            OffsetRect(&damage,current.left,current.top);
+        }
         Count(76);
         // Never expose an erased background before the composed frame.
-        RedrawWindow(h, &damage, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
+        if (!IsRectEmpty(&damage)) RedrawWindow(h, &damage, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_NOCHILDREN);
         return 0;
     }
     if (msg == hitTestMessage && mapped) {
@@ -263,16 +296,17 @@ LRESULT CALLBACK DesktopProc(HWND h, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, D
     }
     if (msg == WM_ERASEBKGND && frameBitmap && frame.opacity && !painting) { Count(68); return 1; }
     if (msg == WM_PAINT && frameBitmap && frame.opacity && !painting) {
-        RECT client;
-        GetClientRect(h, &client);
+        RECT update;
+        if (!GetUpdateRect(h,&update,FALSE) || IsRectEmpty(&update)) return DefSubclassProc(h,msg,wp,lp);
         HDC probe = GetDC(h);
-        bool ready = probe && EnsureBuffer(probe, client.right, client.bottom);
+        bool ready = probe && EnsureBuffer(probe, update.right-update.left, update.bottom-update.top);
         if (probe) ReleaseDC(h, probe);
         if (!ready) return DefSubclassProc(h, msg, wp, lp);
         painting = true;
         PAINTSTRUCT ps = {};
         HDC dc = BeginPaint(h, &ps);
         int saved = SaveDC(bufferDc);
+        SetWindowOrgEx(bufferDc,ps.rcPaint.left,ps.rcPaint.top,nullptr);
         IntersectClipRect(bufferDc, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom);
         HWND wallpaper = GetParent(GetParent(h));
         POINT origin = {};

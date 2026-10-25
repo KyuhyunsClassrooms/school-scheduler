@@ -19,6 +19,9 @@ namespace SchoolWidget
         int todoOffset;
         readonly int inputMessage = Native.RegisterWindowMessage("SchoolSchedulerDockInput.v1");
         Bitmap frame;
+        bool contentDirty=true;
+        int paintedHover=-1;
+        string sourceCaption;
         internal CalendarLayout LayoutInfo { get; private set; }
         internal DateTime Month { get; private set; }
         internal DateTime Selected { get; private set; }
@@ -39,12 +42,12 @@ namespace SchoolWidget
         public WidgetForm(Config config, CalendarStore store)
         {
             cfg=config; Store=store;
-            Feed=new FeedSync(store);Feed.Changed+=QueueRender;
+            Feed=new FeedSync(store);Feed.Changed+=FeedChanged;
             syncTimer.Tick+=async(s,e)=>await Feed.RefreshAsync();syncTimer.Start();
             if(cfg.Mode==Mode.Embed)cfg.Mode=Mode.Dock;
             AutoScaleMode=AutoScaleMode.None;FormBorderStyle=FormBorderStyle.None;
             StartPosition=FormStartPosition.Manual;ShowInTaskbar=false;Text="학사일정 스케줄러";
-            BackColor=Color.FromArgb(27,35,44);DoubleBuffered=true;KeyPreview=true;
+            BackColor=Color.FromArgb(27,35,44);DoubleBuffered=cfg.Mode!=Mode.Dock;KeyPreview=true;
             MinimumSize=new Size(380,480);MaximumSize=new Size(4095,4095);
             Size=new Size(cfg.W,cfg.H);
             var area=Screen.PrimaryScreen.WorkingArea;
@@ -55,7 +58,7 @@ namespace SchoolWidget
             redraw.Tick+=(s,e)=>{redraw.Stop();RenderNow();};
             midnight.Tick+=(s,e)=>{if(today!=DateTime.Today){today=DateTime.Today;QueueRender();}};midnight.Start();
             SizeChanged+=(s,e)=>{CloseMemo();QueueRender();};
-            LocationChanged+=(s,e)=>{CloseMemo();QueueRender();};
+            LocationChanged+=(s,e)=>{CloseMemo();ScheduleRender();};
             Store.Changed+=QueueRender;
             Load+=async(s,e)=>{ApplyMode();await Feed.RefreshAsync();};
             FormClosing+=(s,e)=>{SaveBounds();Quitting=true;DisposeTray();Application.ExitThread();};
@@ -65,21 +68,44 @@ namespace SchoolWidget
 
         void QueueRender()
         {
-            if(resourcesClosed||IsDisposed)return;
-            redraw.Stop();redraw.Start();
+            contentDirty=true;ScheduleRender();
+        }
+        void FeedChanged()
+        {
+            string caption=Feed.Name==null?"학교 일정 연결":Feed.Name+" · 연결 설정";
+            if(caption!=sourceCaption)QueueRender();
+        }
+        void ScheduleRender()
+        {
+            if(resourcesClosed||IsDisposed||!calendarVisible)return;
+            if(!redraw.Enabled)redraw.Start();
         }
         internal void RenderNow()
         {
-            if(resourcesClosed||IsDisposed||!IsHandleCreated||ClientSize.Width<1||ClientSize.Height<1)return;
-            LayoutInfo=new CalendarLayout(ClientSize,Month);
-            var todos=CalendarRenderer.VisibleTodos(Store);
-            todoOffset=Math.Max(0,Math.Min(todoOffset,Math.Max(0,todos.Count-LayoutInfo.TodoCapacity)));
-            var replacement=CalendarRenderer.Render(Store,cfg,LayoutInfo,Selected,hover,todoOffset,
-                Feed.Name==null?"학교 일정 연결":Feed.Name+" · 연결 설정");
-            var old=frame;frame=replacement;if(old!=null)old.Dispose();
-            if(dockActive){dock.SetInteraction(cfg.Locked,32512);dock.Publish(frame,Native.RectOf(Handle),cfg.Opacity*255/100);}
-            else Invalidate();
+            redraw.Stop();
+            if(resourcesClosed||IsDisposed||!calendarVisible||!IsHandleCreated||ClientSize.Width<1||ClientSize.Height<1)return;
+            bool geometryChanged=LayoutInfo==null||LayoutInfo.Size!=ClientSize||LayoutInfo.Month!=Month;
+            if(geometryChanged)LayoutInfo=new CalendarLayout(ClientSize,Month);
+            Rectangle damage=Rectangle.Empty;
+            if(frame==null||frame.Size!=ClientSize)
+            {
+                var old=frame;frame=new Bitmap(Width,Height,System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                if(old!=null)old.Dispose();contentDirty=true;
+            }
+            if(contentDirty||geometryChanged)
+            {
+                var todos=CalendarRenderer.VisibleTodos(Store);
+                todoOffset=Math.Max(0,Math.Min(todoOffset,Math.Max(0,todos.Count-LayoutInfo.TodoCapacity)));
+                sourceCaption=Feed.Name==null?"학교 일정 연결":Feed.Name+" · 연결 설정";
+                CalendarRenderer.Draw(frame,Store,cfg,LayoutInfo,Selected,hover,todoOffset,sourceCaption);
+                damage=new Rectangle(Point.Empty,ClientSize);contentDirty=false;
+            }
+            else if(paintedHover!=hover)damage=CalendarRenderer.UpdateHover(frame,LayoutInfo,paintedHover,hover);
+            paintedHover=hover;
+            if(dockActive){dock.SetInteraction(cfg.Locked,32512);dock.Publish(frame,Native.RectOf(Handle),cfg.Opacity*255/100,damage);}
+            else if(!damage.IsEmpty)Invalidate(damage);
         }
+        protected override void OnPaintBackground(PaintEventArgs e){if(!dockActive)base.OnPaintBackground(e);}
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -101,7 +127,7 @@ namespace SchoolWidget
                 Opacity=cfg.Opacity/100.0;TopMost=cfg.Mode==Mode.Topmost;
                 if(cfg.Mode==Mode.Dock)tray.ShowBalloonTip(5000,"바탕화면 연결",dock.Error??"달력을 일반 창으로 표시합니다.",ToolTipIcon.Info);
             }
-            RenderNow();
+            DoubleBuffered=!dockActive;contentDirty=true;RenderNow();
         }
         void SetClickThrough(bool on)
         {
@@ -119,12 +145,13 @@ namespace SchoolWidget
         void ToggleVisible()
         {
             CloseMemo();calendarVisible=!calendarVisible;
+            if(calendarVisible)RenderNow();
             if(dockActive)dock.SetVisible(calendarVisible);
             else if(calendarVisible)Show();else Hide();
         }
         internal void OpenMemo(DateTime day)
         {
-            CloseMemo();Selected=day.Date;RenderNow();
+            CloseMemo();Selected=day.Date;contentDirty=true;RenderNow();
             int index=LayoutInfo.Index(day);if(index<0||index>=42)return;
             Rectangle cell=LayoutInfo.Cell(index);cell.Offset(Left,Top);
             var editor=new MemoEditorForm(day,Store.Memo(day),cell,cfg.FontSize,text=>Store.SetMemo(day,text));
@@ -195,11 +222,11 @@ namespace SchoolWidget
                 if(kind==0x202||kind==0x2A3){dragHit=0;SaveBounds();}
                 return;
             }
-            if(kind==0x2A3){if(hover!=-1){hover=-1;QueueRender();}return;}
+            if(kind==0x2A3){if(hover!=-1){hover=-1;ScheduleRender();}return;}
             int index=LayoutInfo.CellAt(p);
             if(kind==0x200)
             {
-                if(hover!=index){hover=index;QueueRender();}
+                if(hover!=index){hover=index;ScheduleRender();}
                 uint cursor=LayoutInfo.Move.Contains(p)&&!cfg.Locked?32646u:
                     LayoutInfo.TodoPanel.Contains(p)||LayoutInfo.Prev.Contains(p)||LayoutInfo.Next.Contains(p)||LayoutInfo.Today.Contains(p)||LayoutInfo.Details.Contains(p)||LayoutInfo.Menu.Contains(p)?32649u:32512u;
                 dock.SetInteraction(cfg.Locked,cursor);return;
@@ -315,7 +342,7 @@ namespace SchoolWidget
         }
         public void DisposeTray()
         {
-            if(resourcesClosed)return;CloseMemo();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=QueueRender;Feed.Dispose();Store.Changed-=QueueRender;
+            if(resourcesClosed)return;CloseMemo();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Store.Changed-=QueueRender;
             if(details!=null&&!details.IsDisposed)details.Close();dock.Dispose();tray.Visible=false;tray.Dispose();menu.Dispose();
             if(dayMenu!=null)dayMenu.Dispose();
             if(frame!=null){frame.Dispose();frame=null;}

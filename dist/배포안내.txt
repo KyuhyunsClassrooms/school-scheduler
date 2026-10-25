@@ -1,6 +1,6 @@
-학사일정 스케줄러 2.1.0 · 학교별 서버 연결
+학사일정 스케줄러 2.2.0 · 성능 개선
 
-배포할 파일: SchoolScheduler-2.1.0-x64-Setup.exe
+배포할 파일: SchoolScheduler-2.2.0-x64-Setup.exe
 설치 파일 하나만 전달하면 됩니다. .sha256은 파일 무결성 확인용입니다.
 
 지원 PC: Intel·AMD 64비트 Windows 10 1809 이상 / Windows 11
