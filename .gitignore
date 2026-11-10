@@ -10,6 +10,8 @@
 *.pfx
 *.p12
 *.key
+google-client.json
+google-tasks.json*
 
 # Generated binaries, downloaded dependencies and installers
 widget/bin/

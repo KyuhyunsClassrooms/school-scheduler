@@ -20,7 +20,7 @@ try {
         $output=Join-Path $reportRoot ($label+'-bin')
         New-Item -ItemType Directory -Path $output -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceWidget 'bin\SchoolDockHook.dll') -Destination (Join-Path $output 'SchoolDockHook.dll') -Force
-        $sources=@('Program.cs','CalendarData.cs','CalendarRenderer.cs','NativeDialogs.cs','NativeWidget.cs','ScheduleFeed.cs','FeedConnectionDialog.cs','TimetableCache.cs') | ForEach-Object {Join-Path $sourceWidget ('src\'+$_)} | Where-Object {Test-Path -LiteralPath $_}
+        $sources=@('Program.cs','CalendarData.cs','CalendarRenderer.cs','NativeDialogs.cs','NativeWidget.cs','ScheduleFeed.cs','FeedConnectionDialog.cs','TimetableCache.cs','GoogleTasks.cs') | ForEach-Object {Join-Path $sourceWidget ('src\'+$_)} | Where-Object {Test-Path -LiteralPath $_}
         $csc=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
         & $csc /nologo /target:exe /platform:x64 /codepage:65001 /main:SchoolWidget.PerformanceProbe "/out:$output\PerformanceProbe.exe" `
             /r:System.Core.dll /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Net.Http.dll /r:System.Security.dll `

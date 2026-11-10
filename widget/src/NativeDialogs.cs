@@ -56,7 +56,7 @@ namespace SchoolWidget
             var start=new DateTimePicker {Left=80,Top=56,Width=150,Format=DateTimePickerFormat.Short,Value=existing==null?day:CalendarStore.Date(existing.start)};
             var end=new DateTimePicker {Left=250,Top=56,Width=150,Format=DateTimePickerFormat.Short,Value=existing==null?day:CalendarStore.Date(existing.end)};
             var note=new TextBox {Left=80,Top=96,Width=320,Height=165,Multiline=true,AcceptsReturn=true,ScrollBars=ScrollBars.Vertical,Text=existing==null?"":existing.note};
-            Controls.AddRange(new Control[]{new Label {Text="제목",Left=18,Top=21},new Label {Text="날짜",Left=18,Top=60},new Label {Text="메모",Left=18,Top=100},title,start,end,note});
+            Controls.AddRange(new Control[]{new Label {Text="제목",Left=18,Top=21,Width=58},new Label {Text="날짜",Left=18,Top=60,Width=58},new Label {Text="메모",Left=18,Top=100,Width=58},title,start,end,note});
             var save=new Button {Text="저장",Left=240,Top=281,Width=76};
             var cancel=new Button {Text="취소",Left=324,Top=281,Width=76,DialogResult=DialogResult.Cancel};
             var remove=new Button {Text="삭제",Left=18,Top=281,Width=76,Visible=existing!=null};
@@ -84,7 +84,7 @@ namespace SchoolWidget
             var due=new DateTimePicker {Left=80,Top=56,Width=170,Format=DateTimePickerFormat.Short,ShowCheckBox=true,Value=existing!=null&&!string.IsNullOrEmpty(existing.due)?CalendarStore.Date(existing.due):day,Checked=existing==null||!string.IsNullOrEmpty(existing.due)};
             var important=new CheckBox {Left=270,Top=58,Width=120,Text="중요",Checked=existing!=null&&existing.important};
             var note=new TextBox {Left=80,Top=96,Width=320,Height=150,Multiline=true,AcceptsReturn=true,ScrollBars=ScrollBars.Vertical,Text=existing==null?"":existing.note};
-            Controls.AddRange(new Control[]{new Label {Text="할 일",Left=18,Top=21},new Label {Text="기한",Left=18,Top=60},new Label {Text="메모",Left=18,Top=100},title,due,important,note});
+            Controls.AddRange(new Control[]{new Label {Text="할 일",Left=18,Top=21,Width=58},new Label {Text="기한",Left=18,Top=60,Width=58},new Label {Text="메모",Left=18,Top=100,Width=58},title,due,important,note});
             var save=new Button {Text="저장",Left=240,Top=265,Width=76};
             var cancel=new Button {Text="취소",Left=324,Top=265,Width=76,DialogResult=DialogResult.Cancel};
             var remove=new Button {Text="삭제",Left=18,Top=265,Width=76,Visible=existing!=null};

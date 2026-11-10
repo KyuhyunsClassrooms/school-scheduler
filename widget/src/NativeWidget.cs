@@ -16,6 +16,7 @@ namespace SchoolWidget
         readonly Timer redraw = new Timer { Interval=16 }, midnight = new Timer { Interval=30000 };
         readonly Timer syncTimer = new Timer { Interval=300000 };
         internal readonly FeedSync Feed;
+        internal readonly GoogleTaskSync Tasks;
         int todoOffset;
         Timetable timetable;
         bool timetableOn;
@@ -45,7 +46,8 @@ namespace SchoolWidget
         {
             cfg=config; Store=store;
             Feed=new FeedSync(store);Feed.Changed+=FeedChanged;
-            syncTimer.Tick+=async(s,e)=>await Feed.RefreshAsync();syncTimer.Start();
+            Tasks=new GoogleTaskSync(store);
+            syncTimer.Tick+=async(s,e)=>{await Feed.RefreshAsync();await Tasks.SyncAsync();};syncTimer.Start();
             if(cfg.Mode==Mode.Embed)cfg.Mode=Mode.Dock;
             AutoScaleMode=AutoScaleMode.None;FormBorderStyle=FormBorderStyle.None;
             StartPosition=FormStartPosition.Manual;ShowInTaskbar=false;Text="학사일정 스케줄러";
@@ -63,7 +65,7 @@ namespace SchoolWidget
             SizeChanged+=(s,e)=>{CloseMemo();QueueRender();};
             LocationChanged+=(s,e)=>{CloseMemo();ScheduleRender();};
             Store.Changed+=QueueRender;
-            Load+=async(s,e)=>{ApplyMode();await Feed.RefreshAsync();};
+            Load+=async(s,e)=>{ApplyMode();await Feed.RefreshAsync();await Tasks.SyncAsync();};
             FormClosing+=(s,e)=>{SaveBounds();Quitting=true;DisposeTray();Application.ExitThread();};
             BuildMenu();
         }
@@ -193,6 +195,7 @@ namespace SchoolWidget
             details.Show();details.Activate();
         }
         void ShowConnection(){CloseMemo();using(var dialog=new FeedConnectionDialog(Feed))dialog.ShowDialog(this);}
+        void ShowGoogleTasks(){CloseMemo();using(var dialog=new GoogleTasksDialog(Tasks))dialog.ShowDialog(this);}
         bool HandleTodo(int kind,Point point,int wheel)
         {
             if(!LayoutInfo.TodoPanel.Contains(point))return false;
@@ -350,6 +353,7 @@ namespace SchoolWidget
             menu.Items.Add("할 일 추가",null,(s,e)=>NativeDialogs.EditTodo(Store,Selected,null));
             menu.Items.Add("학교 일정 서버 연결",null,(s,e)=>ShowConnection());
             menu.Items.Add("학교 일정 지금 새로고침",null,async(s,e)=>{await Feed.RefreshAsync();tray.ShowBalloonTip(4000,"학교 일정",Feed.Status,ToolTipIcon.Info);});
+            menu.Items.Add("Google Tasks 연결",null,(s,e)=>ShowGoogleTasks());
             var teacherItem=menu.Items.Add("시간표 교사 선택",null,(s,e)=>ChooseTeacher());
             menu.Items.Add(new ToolStripSeparator());
             lockItem=new ToolStripMenuItem("위치 잠금",null,(s,e)=>{cfg.Locked=!cfg.Locked;cfg.Save();QueueRender();});menu.Items.Add(lockItem);
@@ -376,7 +380,7 @@ namespace SchoolWidget
         }
         public void DisposeTray()
         {
-            if(resourcesClosed)return;CloseMemo();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Store.Changed-=QueueRender;
+            if(resourcesClosed)return;CloseMemo();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Tasks.Dispose();Store.Changed-=QueueRender;
             if(details!=null&&!details.IsDisposed)details.Close();dock.Dispose();tray.Visible=false;tray.Dispose();menu.Dispose();
             if(dayMenu!=null)dayMenu.Dispose();
             if(frame!=null){frame.Dispose();frame=null;}
