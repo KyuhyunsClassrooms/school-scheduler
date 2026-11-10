@@ -6,7 +6,7 @@
 [에이전트에게 요청할 내용]
 
 첨부한 SchoolCalendar-Server-Template-1.0.0.zip을 사용해 우리 학교의 학사일정 서버를 구축해 주세요.
-Windows 바탕화면 앱 2.2.0은 이미 완성되어 있습니다. 앱을 새로 만들 필요는 없습니다.
+Windows 바탕화면 앱 2.3.0은 이미 완성되어 있습니다. 앱을 새로 만들 필요는 없습니다.
 목표는 담당자가 관리자 웹에서 일정을 수정·게시하면, 연결한 PC 달력에 자동 반영되도록 하는 것입니다.
 
 1. 운영 주체와 자료
@@ -15,7 +15,7 @@ Windows 바탕화면 앱 2.2.0은 이미 완성되어 있습니다. 앱을 새�
 - 제작자의 GitHub 저장소는 비공개일 수 있습니다. 접근할 수 없다면 첨부 ZIP을 그대로 사용하세요.
 - ZIP 안의 README.md를 먼저 읽고 PROTOCOL.md, setup.sql, .env.example을 확인하세요.
 - 기존 학사일정 HTML은 초기 일정 데이터입니다. 관리자 웹에 가져오기 기능이 있습니다.
-- 공통 설치 파일: SchoolScheduler-2.2.0-x64-Setup.exe.
+- 공통 설치 파일: SchoolScheduler-2.3.0-x64-Setup.exe.
 
 2. 시작 전 담당자에게 확인할 사항
 - 사용할 학교 이름과 운영 계정.
@@ -80,6 +80,6 @@ Windows 바탕화면 앱 2.2.0은 이미 완성되어 있습니다. 앱을 새�
 
 참고 자료
 - 저장소: https://github.com/KyuhyunsClassrooms/school-scheduler
-- 배포 파일: https://github.com/KyuhyunsClassrooms/school-scheduler/releases/tag/v2.2.0
+- 배포 파일: https://github.com/KyuhyunsClassrooms/school-scheduler/releases/tag/v2.3.0
 - 온라인 서버 안내: https://github.com/KyuhyunsClassrooms/school-scheduler/blob/main/schedule-server/README.md
 - 위 GitHub 링크에 접근할 수 없어도 첨부 ZIP의 README.md로 구축할 수 있습니다.

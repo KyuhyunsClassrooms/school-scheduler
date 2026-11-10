@@ -1,4 +1,4 @@
-# 학사일정 바탕화면 달력 2.2
+# 학사일정 바탕화면 달력 2.3
 
 Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로세스, PNG 캡처를 실행 경로에서 제거했습니다. C# WinForms/GDI+가 투명 비트맵을 직접 그리고, C++ DLL이 Explorer 바탕화면에 합성하고 입력을 전달합니다. DesktopCal의 자체 `dkui.dll`을 사용하는 것은 아닙니다.
 
@@ -50,7 +50,7 @@ Windows 네이티브 달력입니다. WebView2, HTML 화면, 브라우저 프로
 
 앱은 Windows x64와 .NET Framework 4.7.2 이상에서 동작합니다. 네이티브 DLL 빌드에는 `build-native.cmd`에 지정한 Visual Studio 2022 Build Tools의 MSVC x64 도구가 필요합니다. C++ 런타임은 정적으로 연결합니다.
 
-`build-installer.cmd` 또는 `./build-installer.ps1`을 실행하면 `dist/SchoolScheduler-2.2.0-x64-Setup.exe`와 SHA-256 파일을 만듭니다. `-SkipBuild`는 현재 바이너리로 패키지만 다시 만듭니다. 버전은 실행 파일에서 읽습니다.
+`build-installer.cmd` 또는 `./build-installer.ps1`을 실행하면 `dist/SchoolScheduler-2.3.0-x64-Setup.exe`와 SHA-256 파일을 만듭니다. `-SkipBuild`는 현재 바이너리로 패키지만 다시 만듭니다. 버전은 실행 파일에서 읽습니다. 이 공개용 설치 파일에는 `src\google-client.json`을 넣지 않습니다. 본인 PC에서 바로 로그인하려면 `./build-installer.ps1 -Personal`로 `dist/personal/`에 개인용 설치 파일을 따로 만들고, 이 파일은 배포하지 않습니다.
 
 - Intel·AMD x64 Windows 10 1809 이상 / Windows 11. ARM64는 현재 Explorer DLL 패키지의 대상이 아닙니다.
 - 기본 설치 경로는 `%LOCALAPPDATA%\Programs\SchoolScheduler`이며 관리자 권한을 요청하지 않습니다.

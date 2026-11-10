@@ -1,4 +1,5 @@
-param([switch]$SkipBuild)
+# -Personal: src\google-client.json을 넣은 본인 PC용 설치 파일을 dist\personal에 만든다. 공개 배포하지 않는다.
+param([switch]$SkipBuild, [switch]$Personal)
 
 $ErrorActionPreference = 'Stop'
 $widgetRoot = $PSScriptRoot
@@ -27,9 +28,15 @@ try {
                 if ($process -and -not $process.WaitForExit(10000)) { throw 'Quit the running widget before building.' }
             }
         }
-        & (Join-Path $widgetRoot 'build.cmd')
+        $env:SCHOOL_PUBLIC_BUILD = if ($Personal) { $null } else { '1' }
+        try { & (Join-Path $widgetRoot 'build.cmd') }
+        finally { $env:SCHOOL_PUBLIC_BUILD = $null }
         if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
     }
+    # 공개용에 OAuth 클라이언트가 섞이거나 개인용에 빠지면 패키지를 만들지 않는다.
+    $hasClient = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($exe)).GetManifestResourceNames() -contains 'google-client.json'
+    if ($hasClient -and -not $Personal) { throw 'bin\SchoolWidget.exe contains google-client.json. Rebuild without -SkipBuild for a public installer.' }
+    if ($Personal -and -not $hasClient) { throw 'Personal installer needs widget\src\google-client.json.' }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     if (-not (Test-Path -LiteralPath $compiler)) {
@@ -78,10 +85,15 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $widgetRoot "bin\$name"))) { throw "Missing payload: $name" }
     }
     $version = [Reflection.AssemblyName]::GetAssemblyName($exe).Version.ToString(3)
-    & $compiler "/DAppVersion=$version" (Join-Path $widgetRoot 'installer\SchoolScheduler.iss')
+    $output = Join-Path $repoRoot "dist\SchoolScheduler-$version-x64-Setup.exe"
+    $target = @()
+    if ($Personal) {
+        $output = Join-Path $repoRoot "dist\personal\SchoolScheduler-$version-x64-Personal-Setup.exe"
+        $target = @("/O$(Split-Path -Parent $output)", "/F$([IO.Path]::GetFileNameWithoutExtension($output))")
+    }
+    & $compiler "/DAppVersion=$version" @target (Join-Path $widgetRoot 'installer\SchoolScheduler.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
-    $output = Join-Path $repoRoot "dist\SchoolScheduler-$version-x64-Setup.exe"
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $output
     "$($hash.Hash)  $([IO.Path]::GetFileName($output))" |
         Set-Content -LiteralPath "$output.sha256" -Encoding ascii

@@ -14,8 +14,8 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("학사일정 위젯")]
 [assembly: System.Reflection.AssemblyProduct("학사일정 위젯")]
-[assembly: System.Reflection.AssemblyVersion("2.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("2.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("2.3.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("2.3.0.0")]
 
 namespace SchoolWidget
 {
