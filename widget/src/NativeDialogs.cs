@@ -131,6 +131,22 @@ namespace SchoolWidget
             using(var dialog=new OpenFileDialog{Filter="JSON 백업|*.json"})
                 if(dialog.ShowDialog()==DialogResult.OK)Safe(()=>{store.Import(File.ReadAllText(dialog.FileName,Encoding.UTF8));MessageBox.Show("백업을 현재 데이터에 합쳤습니다.","가져오기 완료");});
         }
+        // 선택한 교사 이름, 숨김은 "-", 취소는 null.
+        public static string ChooseTeacher(System.Collections.Generic.List<string> names,string current)
+        {
+            using(var dialog=new Form{Text="시간표 교사 선택",ClientSize=new Size(320,150),Font=new Font("Malgun Gothic",9f),FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterScreen,ShowInTaskbar=false,MaximizeBox=false,MinimizeBox=false})
+            {
+                var teacher=new ComboBox {Left=24,Top=48,Width=272,DropDownStyle=ComboBoxStyle.DropDownList};
+                teacher.Items.Add("(시간표 숨김)");teacher.Items.AddRange(names.ToArray());
+                teacher.SelectedIndex=Math.Max(0,names.IndexOf(current)+1);
+                var save=new Button{Left=156,Top=100,Width=65,Text="적용"};
+                var cancel=new Button{Left=231,Top=100,Width=65,Text="취소",DialogResult=DialogResult.Cancel};
+                dialog.Controls.AddRange(new Control[]{new Label{Text="컴시간알리미가 받아 둔 시간표에서 표시할 교사",Left=24,Top=20,Width=280},teacher,save,cancel});
+                save.Click+=(s,e)=>dialog.DialogResult=DialogResult.OK;
+                dialog.AcceptButton=save;dialog.CancelButton=cancel;
+                return dialog.ShowDialog()!=DialogResult.OK?null:teacher.SelectedIndex==0?"-":(string)teacher.SelectedItem;
+            }
+        }
         public static void Settings(Config cfg,CalendarStore store,Action apply)
         {
             using(var dialog=new Form{Text="달력 설정",ClientSize=new Size(360,280),Font=new Font("Malgun Gothic",9f),FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterScreen,ShowInTaskbar=false,MaximizeBox=false,MinimizeBox=false})

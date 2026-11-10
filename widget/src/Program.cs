@@ -151,6 +151,8 @@ namespace SchoolWidget
         public bool Locked = false;
         public int Opacity = 80;
         public int FontSize = 12, CellAlpha = 90;
+        // Teacher: 시간표에 표시할 교사. 빈 값은 미선택, "-"는 숨김. TimetableDir: 빈 값이면 알리미 기본 폴더.
+        public string Teacher = "", TimetableDir = "";
 
         public static string Dir
         {
@@ -182,6 +184,8 @@ namespace SchoolWidget
                             case "opacity": if (int.TryParse(v, out n) && n >= 30 && n <= 100) c.Opacity = n; break;
                             case "fontSize": if (int.TryParse(v, out n) && n >= 9 && n <= 24) c.FontSize = n; break;
                             case "cellAlpha": if (int.TryParse(v, out n) && n >= 0 && n <= 240) c.CellAlpha = n; break;
+                            case "teacher": c.Teacher = v; break;
+                            case "timetableDir": c.TimetableDir = v; break;
                         }
                     }
             }
@@ -195,8 +199,8 @@ namespace SchoolWidget
             {
                 Directory.CreateDirectory(Dir);
                 File.WriteAllText(FilePath, string.Format(
-                    "x={0}\r\ny={1}\r\nw={2}\r\nh={3}\r\nmode={4}\r\nlocked={5}\r\nopacity={6}\r\nfontSize={7}\r\ncellAlpha={8}\r\n",
-                    X, Y, W, H, (int)Mode, Locked, Opacity, FontSize, CellAlpha));
+                    "x={0}\r\ny={1}\r\nw={2}\r\nh={3}\r\nmode={4}\r\nlocked={5}\r\nopacity={6}\r\nfontSize={7}\r\ncellAlpha={8}\r\nteacher={9}\r\ntimetableDir={10}\r\n",
+                    X, Y, W, H, (int)Mode, Locked, Opacity, FontSize, CellAlpha, Teacher, TimetableDir));
             }
             catch { }
         }

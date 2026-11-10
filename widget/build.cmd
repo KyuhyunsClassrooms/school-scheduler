@@ -6,6 +6,6 @@ if not exist bin mkdir bin
 %CSC% /nologo /target:winexe /platform:x64 /codepage:65001 /win32manifest:src\app.manifest /out:bin\SchoolWidget.exe ^
   /r:System.Core.dll /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Net.Http.dll /r:System.Security.dll ^
   /resource:src\school-events.json,school-events.json ^
-  src\Program.cs src\CalendarData.cs src\CalendarRenderer.cs src\NativeDialogs.cs src\NativeWidget.cs src\ScheduleFeed.cs src\FeedConnectionDialog.cs || exit /b 1
-call build-native.cmd || exit /b 1
+  src\Program.cs src\CalendarData.cs src\CalendarRenderer.cs src\NativeDialogs.cs src\NativeWidget.cs src\ScheduleFeed.cs src\FeedConnectionDialog.cs src\TimetableCache.cs || exit /b 1
+call "%~dp0build-native.cmd" || exit /b 1
 echo build ok

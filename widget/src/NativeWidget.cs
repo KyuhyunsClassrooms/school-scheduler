@@ -17,6 +17,8 @@ namespace SchoolWidget
         readonly Timer syncTimer = new Timer { Interval=300000 };
         internal readonly FeedSync Feed;
         int todoOffset;
+        Timetable timetable;
+        bool timetableOn;
         readonly int inputMessage = Native.RegisterWindowMessage("SchoolSchedulerDockInput.v1");
         Bitmap frame;
         bool contentDirty=true;
@@ -56,7 +58,8 @@ namespace SchoolWidget
             if(!onScreen)Location=new Point(area.Right-Width-24,area.Top+24);
             Selected=today;Month=new DateTime(today.Year,today.Month,1);
             redraw.Tick+=(s,e)=>{redraw.Stop();RenderNow();};
-            midnight.Tick+=(s,e)=>{if(today!=DateTime.Today){today=DateTime.Today;QueueRender();}};midnight.Start();
+            midnight.Tick+=(s,e)=>{if(today!=DateTime.Today){today=DateTime.Today;QueueRender();}RefreshTimetable();};midnight.Start();
+            RefreshTimetable();
             SizeChanged+=(s,e)=>{CloseMemo();QueueRender();};
             LocationChanged+=(s,e)=>{CloseMemo();ScheduleRender();};
             Store.Changed+=QueueRender;
@@ -69,6 +72,29 @@ namespace SchoolWidget
         void QueueRender()
         {
             contentDirty=true;ScheduleRender();
+        }
+        string TimetableFolder { get { return cfg.TimetableDir.Length==0?TimetableCache.DefaultFolder:cfg.TimetableDir; } }
+        // 알리미가 캐시를 다시 쓰면 반영한다. 쓰는 중이거나 읽지 못하면 이전 시간표를 유지한다.
+        void RefreshTimetable()
+        {
+            string folder=TimetableFolder;
+            bool on=cfg.Teacher!="-"&&TimetableCache.Exists(folder);
+            if(on!=timetableOn){timetableOn=on;QueueRender();}
+            if(!on||cfg.Teacher.Length==0){if(timetable!=null){timetable=null;QueueRender();}return;}
+            DateTime stamp=TimetableCache.Stamp(folder);
+            if(stamp==DateTime.MinValue||DateTime.UtcNow-stamp<TimeSpan.FromSeconds(2))return;
+            if(timetable!=null&&timetable.Teacher==cfg.Teacher&&timetable.Stamp==stamp)return;
+            var loaded=TimetableCache.Load(folder,cfg.Teacher);
+            if(loaded!=null){timetable=loaded;QueueRender();}
+        }
+        void ChooseTeacher()
+        {
+            CloseMemo();
+            NativeDialogs.Safe(()=>{
+                string chosen=NativeDialogs.ChooseTeacher(TimetableCache.Teachers(TimetableFolder),cfg.Teacher);
+                if(chosen==null)return;
+                cfg.Teacher=chosen;cfg.Save();timetable=null;RefreshTimetable();QueueRender();
+            });
         }
         void FeedChanged()
         {
@@ -84,8 +110,8 @@ namespace SchoolWidget
         {
             redraw.Stop();
             if(resourcesClosed||IsDisposed||!calendarVisible||!IsHandleCreated||ClientSize.Width<1||ClientSize.Height<1)return;
-            bool geometryChanged=LayoutInfo==null||LayoutInfo.Size!=ClientSize||LayoutInfo.Month!=Month;
-            if(geometryChanged)LayoutInfo=new CalendarLayout(ClientSize,Month);
+            bool geometryChanged=LayoutInfo==null||LayoutInfo.Size!=ClientSize||LayoutInfo.Month!=Month||LayoutInfo.Timetable.IsEmpty==timetableOn;
+            if(geometryChanged)LayoutInfo=new CalendarLayout(ClientSize,Month,timetableOn);
             Rectangle damage=Rectangle.Empty;
             if(frame==null||frame.Size!=ClientSize)
             {
@@ -97,7 +123,7 @@ namespace SchoolWidget
                 var todos=CalendarRenderer.VisibleTodos(Store);
                 todoOffset=Math.Max(0,Math.Min(todoOffset,Math.Max(0,todos.Count-LayoutInfo.TodoCapacity)));
                 sourceCaption=Feed.Name==null?"학교 일정 연결":Feed.Name+" · 연결 설정";
-                CalendarRenderer.Draw(frame,Store,cfg,LayoutInfo,Selected,hover,todoOffset,sourceCaption);
+                CalendarRenderer.Draw(frame,Store,cfg,LayoutInfo,Selected,hover,todoOffset,sourceCaption,timetable);
                 damage=new Rectangle(Point.Empty,ClientSize);contentDirty=false;
             }
             else if(paintedHover!=hover)damage=CalendarRenderer.UpdateHover(frame,LayoutInfo,paintedHover,hover);
@@ -228,8 +254,15 @@ namespace SchoolWidget
             {
                 if(hover!=index){hover=index;ScheduleRender();}
                 uint cursor=LayoutInfo.Move.Contains(p)&&!cfg.Locked?32646u:
-                    LayoutInfo.TodoPanel.Contains(p)||LayoutInfo.Prev.Contains(p)||LayoutInfo.Next.Contains(p)||LayoutInfo.Today.Contains(p)||LayoutInfo.Details.Contains(p)||LayoutInfo.Menu.Contains(p)?32649u:32512u;
+                    LayoutInfo.TodoPanel.Contains(p)||LayoutInfo.Timetable.Contains(p)||LayoutInfo.Prev.Contains(p)||LayoutInfo.Next.Contains(p)||LayoutInfo.Today.Contains(p)||LayoutInfo.Details.Contains(p)||LayoutInfo.Menu.Contains(p)?32649u:32512u;
                 dock.SetInteraction(cfg.Locked,cursor);return;
+            }
+            if(LayoutInfo.Timetable.Contains(p))
+            {
+                // 제목 줄이나 빈 패널을 누르면 교사 선택, 휠은 주 이동.
+                if(kind==0x201&&(timetable==null||p.Y<LayoutInfo.Timetable.Y+36)){CloseMemo();ChooseTeacher();}
+                else if(kind==0x20A)GoTo(Selected.AddDays(data>0?-7:7));
+                return;
             }
             if(kind==0x20A){if(!HandleTodo(kind,p,data))MoveMonth(data>0?-1:1);return;}
             if(kind==0x201)
@@ -317,6 +350,7 @@ namespace SchoolWidget
             menu.Items.Add("할 일 추가",null,(s,e)=>NativeDialogs.EditTodo(Store,Selected,null));
             menu.Items.Add("학교 일정 서버 연결",null,(s,e)=>ShowConnection());
             menu.Items.Add("학교 일정 지금 새로고침",null,async(s,e)=>{await Feed.RefreshAsync();tray.ShowBalloonTip(4000,"학교 일정",Feed.Status,ToolTipIcon.Info);});
+            var teacherItem=menu.Items.Add("시간표 교사 선택",null,(s,e)=>ChooseTeacher());
             menu.Items.Add(new ToolStripSeparator());
             lockItem=new ToolStripMenuItem("위치 잠금",null,(s,e)=>{cfg.Locked=!cfg.Locked;cfg.Save();QueueRender();});menu.Items.Add(lockItem);
             var modes=new ToolStripMenuItem("표시 방식");
@@ -327,7 +361,7 @@ namespace SchoolWidget
             menu.Items.Add("백업 저장",null,(s,e)=>NativeDialogs.Export(Store));
             menu.Items.Add("백업 가져오기",null,(s,e)=>NativeDialogs.Import(Store));
             menu.Items.Add("종료",null,(s,e)=>Program.Quit());
-            menu.Opening+=(s,e)=>{lockItem.Checked=cfg.Locked;startupItem.Checked=IsStartupOn();foreach(ToolStripMenuItem item in modes.DropDownItems)item.Checked=(Mode)item.Tag==cfg.Mode;};
+            menu.Opening+=(s,e)=>{teacherItem.Visible=TimetableCache.Exists(TimetableFolder);lockItem.Checked=cfg.Locked;startupItem.Checked=IsStartupOn();foreach(ToolStripMenuItem item in modes.DropDownItems)item.Checked=(Mode)item.Tag==cfg.Mode;};
         }
         void AddMode(ToolStripMenuItem parent,string text,Mode mode)
         {

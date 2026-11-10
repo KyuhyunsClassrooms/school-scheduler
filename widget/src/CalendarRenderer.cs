@@ -14,9 +14,11 @@ namespace SchoolWidget
         public readonly DateTime Month, First;
         public readonly Rectangle Prev, Next, Today, Details, Menu, Move;
         public readonly Rectangle TodoPanel, TodoAdd, TodoAll, TodoToday, TodoImportant, TodoDone, TodoPrevious, TodoNext, Source;
+        // 시간표를 쓰지 않으면 비어 있고 할 일 패널이 전체를 차지한다.
+        public readonly Rectangle Timetable;
         public readonly int CalendarWidth, CalendarBottom, TodoRowHeight = 45;
         public const int GridTop = 64, Margin = 6;
-        public CalendarLayout(Size size, DateTime month)
+        public CalendarLayout(Size size, DateTime month, bool timetable = false)
         {
             Size = size; Month = new DateTime(month.Year, month.Month, 1);
             First = Month.AddDays(-(int)Month.DayOfWeek);
@@ -27,6 +29,16 @@ namespace SchoolWidget
             CalendarBottom = side ? size.Height : size.Height - panelHeight - 6;
             TodoPanel = side ? new Rectangle(CalendarWidth + 2, 6, size.Width - CalendarWidth - 8, size.Height - 12) :
                 new Rectangle(6, CalendarBottom + 2, size.Width - 12, size.Height - CalendarBottom - 8);
+            if (timetable && side)
+            {
+                Timetable = new Rectangle(TodoPanel.X, TodoPanel.Y, TodoPanel.Width, Math.Min(314, TodoPanel.Height * 45 / 100));
+                TodoPanel = Rectangle.FromLTRB(TodoPanel.X, Timetable.Bottom + 6, TodoPanel.Right, TodoPanel.Bottom);
+            }
+            else if (timetable)
+            {
+                Timetable = new Rectangle(TodoPanel.X, TodoPanel.Y, Math.Min(280, TodoPanel.Width / 2 - 3), TodoPanel.Height);
+                TodoPanel = Rectangle.FromLTRB(Timetable.Right + 6, TodoPanel.Y, TodoPanel.Right, TodoPanel.Bottom);
+            }
             TodoAdd = new Rectangle(TodoPanel.Right - 56, TodoPanel.Y + 8, 48, 25);
             int filterWidth = (TodoPanel.Width - 16) / 3;
             TodoAll = new Rectangle(TodoPanel.X+8,TodoPanel.Y+39,filterWidth,24);
@@ -97,13 +109,13 @@ namespace SchoolWidget
                 using (var brush = new SolidBrush(color)) g.DrawString(text ?? "", font, brush, rect, format);
             }
         }
-        public static Bitmap Render(CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset=0, string source="일정 서버 연결")
+        public static Bitmap Render(CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset=0, string source="일정 서버 연결", Timetable timetable=null)
         {
             var image = new Bitmap(layout.Size.Width, layout.Size.Height, PixelFormat.Format32bppPArgb);
-            Draw(image,store,cfg,layout,selected,hover,todoOffset,source);
+            Draw(image,store,cfg,layout,selected,hover,todoOffset,source,timetable);
             return image;
         }
-        public static void Draw(Bitmap image, CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset, string source)
+        public static void Draw(Bitmap image, CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset, string source, Timetable timetable=null)
         {
             using (var g = Graphics.FromImage(image))
             using (var body = new Font("Malgun Gothic", cfg.FontSize, FontStyle.Regular, GraphicsUnit.Pixel))
@@ -197,6 +209,48 @@ namespace SchoolWidget
                 Button(g,store.Data.prefs.showDone?"☑ 완료 포함":"☐ 완료 포함",body,layout.TodoDone,false);
                 Button(g,"‹",body,layout.TodoPrevious,false);Button(g,"›",body,layout.TodoNext,false);
                 Button(g,source,body,layout.Source,false);
+                if(!layout.Timetable.IsEmpty)DrawTimetable(g,body,bold,cfg,layout.Timetable,timetable,selected);
+            }
+        }
+        // 선택한 날짜가 속한 주의 교사 시간표. 옮겨 온 수업은 보라색, 빠진 수업은 취소선.
+        static void DrawTimetable(Graphics g,Font body,Font bold,Config cfg,Rectangle panel,Timetable table,DateTime selected)
+        {
+            using(var fill=new SolidBrush(Color.FromArgb(Math.Min(225,cfg.CellAlpha+65),20,30,39)))g.FillRectangle(fill,panel);
+            DateTime monday=Timetable.MondayOf(selected);
+            Text(g,table==null?"시간표":"시간표 · "+table.Teacher,bold,Color.White,new Rectangle(panel.X+10,panel.Y+10,panel.Width-96,24),false,false);
+            DateTime friday=monday.AddDays(4);
+            Text(g,monday.Month+"/"+monday.Day+"~"+friday.Month+"/"+friday.Day,body,Color.Silver,new Rectangle(panel.Right-88,panel.Y+8,80,24),true,false);
+            var week=table==null?null:table.Week(selected);
+            var rest=Rectangle.FromLTRB(panel.X+8,panel.Y+38,panel.Right-8,panel.Bottom-8);
+            if(week==null||week.Periods<1)
+            {
+                Text(g,table==null?"눌러서 교사를 선택하세요":"이 주는 시간표 자료가 없습니다",body,Color.Silver,rest,true,false);return;
+            }
+            const int label=18,head=20;
+            int column=(rest.Width-label)/TimetableWeek.Days,row=(rest.Height-head)/week.Periods,line=cfg.FontSize+4;
+            bool twoLines=row>=line*2+2;
+            string[] weekdays={"월","화","수","목","금"};
+            using(var strike=new Font(body,FontStyle.Strikeout))
+            for(int day=1;day<=TimetableWeek.Days;day++)
+            {
+                DateTime date=monday.AddDays(day-1);int x=rest.X+label+(day-1)*column;
+                bool today=date==DateTime.Today;
+                if(today)using(var mark=new SolidBrush(Color.FromArgb(230,23,135,120)))g.FillRectangle(mark,x,rest.Y,column-2,head-2);
+                Text(g,weekdays[day-1]+" "+date.Day,today||date==selected.Date?bold:body,Color.White,new Rectangle(x,rest.Y,column-2,head-2),true,false);
+                for(int period=1;period<=week.Periods;period++)
+                {
+                    var cell=new Rectangle(x,rest.Y+head+(period-1)*row,column-2,row-2);
+                    if(day==1)Text(g,period.ToString(),body,Color.Silver,new Rectangle(rest.X,cell.Y,label-2,cell.Height),true,false);
+                    var lesson=week.Cells[day,period];
+                    bool active=lesson!=null&&!lesson.Removed;
+                    using(var fill=new SolidBrush(active?Color.FromArgb(today?85:45,200,220,230):Color.FromArgb(14,200,220,230)))g.FillRectangle(fill,cell);
+                    if(lesson==null)continue;
+                    Color color=lesson.Removed?Color.FromArgb(150,Color.Silver):lesson.Moved?CategoryColor("수업 변경"):Color.White;
+                    Font font=lesson.Removed?strike:bold;
+                    if(!twoLines||lesson.Subject.Length==0){Text(g,lesson.ClassName,font,color,cell,true,false);continue;}
+                    Text(g,lesson.ClassName,font,color,new Rectangle(cell.X,cell.Y+cell.Height/2-line,cell.Width,line),true,false);
+                    Text(g,lesson.Subject,lesson.Removed?strike:body,lesson.Removed||lesson.Moved?color:Color.Silver,new Rectangle(cell.X,cell.Y+cell.Height/2,cell.Width,line),true,false);
+                }
             }
         }
         static void Border(Graphics g,Rectangle cell,bool highlighted)
