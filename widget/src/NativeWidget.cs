@@ -20,7 +20,8 @@ namespace SchoolWidget
         int todoOffset;
         readonly ToolTip tip = new ToolTip { ShowAlways=true, UseAnimation=false, UseFading=false, OwnerDraw=true };
         readonly Timer tipTimer = new Timer { Interval=600 };
-        string tipKey, tipText;
+        string tipKey, tipText, tipProbe, todoNote;
+        bool tasksFailed;
         Point tipAt;
         Timetable timetable;
         bool timetableOn;
@@ -50,7 +51,7 @@ namespace SchoolWidget
         {
             cfg=config; Store=store;
             Feed=new FeedSync(store);Feed.Changed+=FeedChanged;
-            Tasks=new GoogleTaskSync(store);
+            Tasks=new GoogleTaskSync(store);Tasks.Changed+=TasksChanged;
             syncTimer.Tick+=async(s,e)=>{await Feed.RefreshAsync();await Tasks.SyncAsync();};syncTimer.Start();
             if(cfg.Mode==Mode.Embed)cfg.Mode=Mode.Dock;
             AutoScaleMode=AutoScaleMode.None;FormBorderStyle=FormBorderStyle.None;
@@ -117,7 +118,7 @@ namespace SchoolWidget
             };
             tipTimer.Tick+=(s,e)=>{tipTimer.Stop();if(tipText!=null&&calendarVisible&&!resourcesClosed)tip.Show(tipText,this,tipAt.X+14,tipAt.Y+22,20000);};
         }
-        void HideTip(){tipTimer.Stop();if(tipKey!=null){tipKey=null;tipText=null;tip.Hide(this);}}
+        void HideTip(){tipTimer.Stop();tipProbe=null;if(tipKey!=null){tipKey=null;tipText=null;tip.Hide(this);}}
         static string Clip(string text){text=(text??"").Trim();return text.Length>400?text.Substring(0,400)+"…":text;}
         string DayTip(DateTime day)
         {
@@ -134,21 +135,31 @@ namespace SchoolWidget
         }
         void HoverTip(Point p)
         {
-            string key=null,text=null;
+            // 마우스가 움직일 때마다 불리므로, 가리키는 대상이 바뀔 때만 내용을 만든다.
+            string probe=null,text=null;TodoItem todo=null;
             int row=LayoutInfo.TodoPanel.Contains(p)?LayoutInfo.TodoAt(p):-1,cell=LayoutInfo.CellAt(p);
             if(row>=0)
             {
                 var rows=CalendarRenderer.VisibleTodos(Store);
-                if(todoOffset+row<rows.Count)
-                {
-                    var todo=rows[todoOffset+row];key="todo:"+todo.id;
-                    text=(todo.important?"★ ":"")+todo.title+"\n"+(string.IsNullOrEmpty(todo.due)?"기한 없음":"기한 "+todo.due)+(string.IsNullOrWhiteSpace(todo.note)?"":"\n\n"+Clip(todo.note));
-                }
+                if(todoOffset+row<rows.Count){todo=rows[todoOffset+row];probe="todo:"+todo.id;}
             }
-            else if(cell>=0){text=DayTip(LayoutInfo.First.AddDays(cell));if(text!=null)key="day:"+LayoutInfo.First.AddDays(cell).ToString("yyyyMMdd");}
+            else if(cell>=0)probe="day:"+cell;
             tipAt=p;
-            if(key==tipKey)return;
-            HideTip();tipKey=key;tipText=text;if(key!=null)tipTimer.Start();
+            if(probe==tipProbe)return;
+            HideTip();tipProbe=probe;
+            if(todo!=null)text=(todo.important?"★ ":"")+todo.title+"\n"+(string.IsNullOrEmpty(todo.due)?"기한 없음":"기한 "+todo.due)+(string.IsNullOrWhiteSpace(todo.note)?"":"\n\n"+Clip(todo.note));
+            else if(cell>=0)text=DayTip(LayoutInfo.First.AddDays(cell));
+            if(text==null)return;
+            tipKey=probe;tipText=text;tipTimer.Start();
+        }
+        string TodoNote(){return !Tasks.Connected?null:Tasks.Failed?"Google 동기화 오류":"Google";}
+        // 로그인 만료 같은 실패는 조용히 멈추지 않도록 한 번 알린다.
+        void TasksChanged()
+        {
+            if(resourcesClosed)return;
+            if(TodoNote()!=todoNote)QueueRender();
+            if(Tasks.Failed&&!tasksFailed)tray.ShowBalloonTip(8000,"Google Tasks",Tasks.Status,ToolTipIcon.Warning);
+            tasksFailed=Tasks.Failed;
         }
         void FeedChanged()
         {
@@ -177,7 +188,8 @@ namespace SchoolWidget
                 var todos=CalendarRenderer.VisibleTodos(Store);
                 todoOffset=Math.Max(0,Math.Min(todoOffset,Math.Max(0,todos.Count-LayoutInfo.TodoCapacity)));
                 sourceCaption=Feed.Name==null?"학교 일정 연결":Feed.Name+" · 연결 설정";
-                CalendarRenderer.Draw(frame,Store,cfg,LayoutInfo,Selected,hover,todoOffset,sourceCaption,timetable);
+                todoNote=TodoNote();
+                CalendarRenderer.Draw(frame,Store,cfg,LayoutInfo,Selected,hover,todoOffset,sourceCaption,timetable,todoNote);
                 damage=new Rectangle(Point.Empty,ClientSize);contentDirty=false;
             }
             else if(paintedHover!=hover)damage=CalendarRenderer.UpdateHover(frame,LayoutInfo,paintedHover,hover);
@@ -238,7 +250,8 @@ namespace SchoolWidget
             MemoEditor=editor;editor.FormClosed+=(s,e)=>{if(MemoEditor==editor)MemoEditor=null;QueueRender();};
             editor.Show(this);editor.Activate();
         }
-        void CloseMemo(){if(MemoEditor!=null&&!MemoEditor.IsDisposed){var editor=MemoEditor;MemoEditor=null;editor.Close();}}
+        protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);HideTip();}
+        void CloseMemo(){HideTip();if(MemoEditor!=null&&!MemoEditor.IsDisposed){var editor=MemoEditor;MemoEditor=null;editor.Close();}}
         void ShowDetails()
         {
             CloseMemo();
@@ -434,7 +447,7 @@ namespace SchoolWidget
         }
         public void DisposeTray()
         {
-            if(resourcesClosed)return;CloseMemo();HideTip();tipTimer.Dispose();tip.Dispose();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Tasks.Dispose();Store.Changed-=QueueRender;
+            if(resourcesClosed)return;CloseMemo();HideTip();tipTimer.Dispose();tip.Dispose();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Tasks.Changed-=TasksChanged;Tasks.Dispose();Store.Changed-=QueueRender;
             if(details!=null&&!details.IsDisposed)details.Close();dock.Dispose();tray.Visible=false;tray.Dispose();menu.Dispose();
             if(dayMenu!=null)dayMenu.Dispose();
             if(frame!=null){frame.Dispose();frame=null;}

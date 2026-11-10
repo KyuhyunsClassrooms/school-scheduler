@@ -26,7 +26,8 @@ namespace SchoolWidget
         public string Teacher;
         public DateTime Stamp;
         public readonly Dictionary<DateTime, TimetableWeek> Weeks = new Dictionary<DateTime, TimetableWeek>();
-        public static DateTime MondayOf(DateTime day) { return day.Date.AddDays(-(((int)day.DayOfWeek + 6) % 7)); }
+        // 달력이 일요일부터 시작하므로 일요일은 같은 줄에 있는 다음 날(월요일)의 주로 본다.
+        public static DateTime MondayOf(DateTime day) { return day.Date.AddDays(1 - (int)day.DayOfWeek); }
         public TimetableWeek Week(DateTime day)
         {
             TimetableWeek week;

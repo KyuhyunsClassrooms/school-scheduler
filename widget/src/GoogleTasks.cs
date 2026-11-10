@@ -55,6 +55,9 @@ namespace SchoolWidget
         public bool Busy { get; private set; }
         public string Status { get; private set; }
         public bool Connected { get { return settings.listId.Length > 0; } }
+        // 마지막 동기화가 실패했는지. 로그인 만료처럼 사용자가 알아야 하는 상태다.
+        public bool Failed { get; private set; }
+        bool linksDirty;
         public string ListTitle { get { return settings.listTitle; } }
         public event Action Changed;
 
@@ -228,7 +231,7 @@ namespace SchoolWidget
         }
         public void Disconnect()
         {
-            soon.Stop(); access = null; settings = new GoogleTaskSettings();
+            soon.Stop(); access = null; Failed = false; settings = new GoogleTaskSettings();
             if (File.Exists(settingsPath)) File.Delete(settingsPath);
             Status = "연결되지 않음"; Notify();
         }
@@ -267,9 +270,11 @@ namespace SchoolWidget
         static bool Deleted(Dictionary<string, object> task) { return Text(task, "deleted").Equals("true", StringComparison.OrdinalIgnoreCase); }
         static bool Done(Dictionary<string, object> task) { return Text(task, "status") == "completed"; }
         static string Due(Dictionary<string, object> task) { string due = Text(task, "due"); return due.Length >= 10 ? due.Substring(0, 10) : ""; }
+        static string Limit(string text, int max) { text = text ?? ""; return text.Length > max ? text.Substring(0, max) : text; }
         static Dictionary<string, object> Body(TodoItem todo)
         {
-            var body = new Dictionary<string, object> { { "title", todo.title }, { "notes", todo.note ?? "" },
+            // Google의 길이 제한을 넘으면 항목 하나 때문에 전체 동기화가 계속 실패한다.
+            var body = new Dictionary<string, object> { { "title", Limit(todo.title, 1024) }, { "notes", Limit(todo.note, 8192) },
                 { "due", string.IsNullOrEmpty(todo.due) ? null : todo.due + "T00:00:00.000Z" }, { "status", todo.done ? "completed" : "needsAction" } };
             if (!todo.done) body["completed"] = null;
             return body;
@@ -288,7 +293,7 @@ namespace SchoolWidget
         string TasksPath { get { return "/lists/" + Uri.EscapeDataString(settings.listId) + "/tasks"; } }
         void Linked(TodoItem todo, Dictionary<string, object> task)
         {
-            string hash = Hash(todo);
+            string hash = Hash(todo); linksDirty = true;
             settings.links[todo.id] = new TaskLink { googleId = Text(task, "id"), hash = hash, seenHash = hash, remoteUpdated = Text(task, "updated"), changedAt = Now() };
         }
         public async Task SyncAsync()
@@ -308,6 +313,11 @@ namespace SchoolWidget
                     foreach (var item in Items(result)) remote[Text(item, "id")] = item;
                     page = Text(result, "nextPageToken");
                 } while (page.Length > 0);
+                // 할 일 파일이 초기화됐거나 목록이 통째로 바뀐 경우 반대쪽을 대량으로 지우지 않는다.
+                var present = new HashSet<string>(todos.Select(t => t.id));
+                int limit = Math.Max(5, settings.links.Count / 2);
+                if (settings.links.Count(p => !present.Contains(p.Key)) > limit || settings.links.Count(p => present.Contains(p.Key) && !remote.ContainsKey(p.Value.googleId)) > limit)
+                    throw new IOException("한꺼번에 너무 많은 할 일이 사라져 동기화를 멈췄습니다. 연결을 해제한 뒤 다시 연결하면 양쪽을 합칩니다.");
                 var handled = new HashSet<string>(settings.links.Values.Select(link => link.googleId));
                 foreach (var todo in todos.ToList())
                 {
@@ -329,13 +339,13 @@ namespace SchoolWidget
                     {
                         // Google에서 지운 항목. 그 뒤 PC에서 고쳤다면 다시 만든다.
                         if (mine) Linked(todo, await Transport("POST", TasksPath, Body(todo)));
-                        else { todos.Remove(todo); settings.links.Remove(todo.id); localChanged = true; }
+                        else { todos.Remove(todo); settings.links.Remove(todo.id); localChanged = linksDirty = true; }
                         continue;
                     }
                     bool theirs = Text(task, "updated") != link.remoteUpdated;
                     if (mine && (!theirs || Time(link.changedAt) >= Time(Text(task, "updated"))))
                         Linked(todo, await Transport("PATCH", TasksPath + "/" + Uri.EscapeDataString(link.googleId), Body(todo)));
-                    else if (theirs) { Apply(todo, task); Linked(todo, task); localChanged = true; }
+                    else if (theirs) { Apply(todo, task); if (Hash(todo) != hash) localChanged = true; Linked(todo, task); }
                 }
                 foreach (var pair in settings.links.Where(p => !todos.Any(t => t.id == p.Key)).ToList())
                 {
@@ -343,7 +353,7 @@ namespace SchoolWidget
                     if (remote.TryGetValue(pair.Value.googleId, out task) && !Deleted(task))
                         try { await Transport("DELETE", TasksPath + "/" + Uri.EscapeDataString(pair.Value.googleId), null); }
                         catch (GoogleApiException ex) { if (ex.Code != 404 && ex.Code != 410) throw; }
-                    settings.links.Remove(pair.Key);
+                    settings.links.Remove(pair.Key); linksDirty = true;
                 }
                 foreach (var task in remote.Values)
                 {
@@ -357,8 +367,9 @@ namespace SchoolWidget
             // 일부만 반영된 뒤 실패해도 대응표와 할 일을 저장해 다음 동기화에서 중복을 만들지 않는다.
             if (!disposed)
             {
-                try { SaveSettings(); if (localChanged) store.Save(); }
+                try { if (linksDirty) { SaveSettings(); linksDirty = false; } if (localChanged) store.Save(); }
                 catch (Exception ex) { error = error ?? ex.Message; }
+                Failed = error != null;
                 Status = error == null ? "동기화 완료 · " + DateTime.Now.ToString("HH:mm") : "동기화 실패 · " + error;
             }
             Busy = false;

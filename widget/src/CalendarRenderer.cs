@@ -115,7 +115,8 @@ namespace SchoolWidget
             Draw(image,store,cfg,layout,selected,hover,todoOffset,source,timetable);
             return image;
         }
-        public static void Draw(Bitmap image, CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset, string source, Timetable timetable=null)
+        // todoNote: 할 일 제목 옆에 붙이는 동기화 상태(없으면 null).
+        public static void Draw(Bitmap image, CalendarStore store, Config cfg, CalendarLayout layout, DateTime selected, int hover, int todoOffset, string source, Timetable timetable=null, string todoNote=null)
         {
             using (var g = Graphics.FromImage(image))
             using (var body = new Font("Malgun Gothic", cfg.FontSize, FontStyle.Regular, GraphicsUnit.Pixel))
@@ -189,7 +190,7 @@ namespace SchoolWidget
                 }
                 using(var fill=new SolidBrush(Color.FromArgb(Math.Min(225,cfg.CellAlpha+65),20,30,39)))g.FillRectangle(fill,layout.TodoPanel);
                 int open=store.Data.todos.Count(t=>!t.done);
-                Text(g,"할 일 · "+open,bold,Color.White,new Rectangle(layout.TodoPanel.X+10,layout.TodoPanel.Y+10,layout.TodoPanel.Width-73,24),false,false);
+                Text(g,"할 일 · "+open+(todoNote==null?"":" · "+todoNote),bold,Color.White,new Rectangle(layout.TodoPanel.X+10,layout.TodoPanel.Y+10,layout.TodoPanel.Width-73,24),false,false);
                 Button(g,"+ 추가",body,layout.TodoAdd,false);
                 Button(g,"전체",body,layout.TodoAll,store.Data.prefs.todoFilter!="today"&&store.Data.prefs.todoFilter!="important");
                 Button(g,"오늘까지",body,layout.TodoToday,store.Data.prefs.todoFilter=="today");
