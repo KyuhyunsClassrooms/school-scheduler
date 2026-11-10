@@ -18,6 +18,10 @@ namespace SchoolWidget
         internal readonly FeedSync Feed;
         internal readonly GoogleTaskSync Tasks;
         int todoOffset;
+        readonly ToolTip tip = new ToolTip { ShowAlways=true, UseAnimation=false, UseFading=false, OwnerDraw=true };
+        readonly Timer tipTimer = new Timer { Interval=600 };
+        string tipKey, tipText;
+        Point tipAt;
         Timetable timetable;
         bool timetableOn;
         readonly int inputMessage = Native.RegisterWindowMessage("SchoolSchedulerDockInput.v1");
@@ -67,7 +71,7 @@ namespace SchoolWidget
             Store.Changed+=QueueRender;
             Load+=async(s,e)=>{ApplyMode();await Feed.RefreshAsync();await Tasks.SyncAsync();};
             FormClosing+=(s,e)=>{SaveBounds();Quitting=true;DisposeTray();Application.ExitThread();};
-            BuildMenu();
+            BuildMenu();SetupTip();
         }
         protected override CreateParams CreateParams { get {var p=base.CreateParams;p.ExStyle|=Native.WS_EX_TOOLWINDOW;return p;} }
 
@@ -97,6 +101,54 @@ namespace SchoolWidget
                 if(chosen==null)return;
                 cfg.Teacher=chosen;cfg.Save();timetable=null;RefreshTimetable();QueueRender();
             });
+        }
+        // 잘려 보이는 할 일·일정 위에 마우스를 잠시 두면 전체 내용을 말풍선으로 보여준다.
+        Font TipFont(){return new Font("Malgun Gothic",Math.Max(13,cfg.FontSize+1),FontStyle.Regular,GraphicsUnit.Pixel);}
+        const TextFormatFlags TipFormat=TextFormatFlags.WordBreak|TextFormatFlags.NoPrefix;
+        void SetupTip()
+        {
+            tip.Popup+=(s,e)=>{using(var font=TipFont())e.ToolTipSize=Size.Add(TextRenderer.MeasureText(tipText??"",font,new Size(440,0),TipFormat),new Size(18,14));};
+            tip.Draw+=(s,e)=>{
+                using(var font=TipFont())using(var back=new SolidBrush(Color.FromArgb(27,35,44)))using(var edge=new Pen(Color.FromArgb(110,130,145)))
+                {
+                    e.Graphics.FillRectangle(back,e.Bounds);e.Graphics.DrawRectangle(edge,0,0,e.Bounds.Width-1,e.Bounds.Height-1);
+                    TextRenderer.DrawText(e.Graphics,e.ToolTipText,font,Rectangle.Inflate(e.Bounds,-9,-7),Color.White,TipFormat);
+                }
+            };
+            tipTimer.Tick+=(s,e)=>{tipTimer.Stop();if(tipText!=null&&calendarVisible&&!resourcesClosed)tip.Show(tipText,this,tipAt.X+14,tipAt.Y+22,20000);};
+        }
+        void HideTip(){tipTimer.Stop();if(tipKey!=null){tipKey=null;tipText=null;tip.Hide(this);}}
+        static string Clip(string text){text=(text??"").Trim();return text.Length>400?text.Substring(0,400)+"…":text;}
+        string DayTip(DateTime day)
+        {
+            var lines=new System.Collections.Generic.List<string>();
+            foreach(var entry in Store.Entries(day))
+            {
+                lines.Add("· "+entry.Title+"  ("+entry.Category+(entry.End>entry.Start?", "+entry.Start.ToString("M.d")+"~"+entry.End.ToString("M.d"):"")+")");
+                if(!string.IsNullOrWhiteSpace(entry.Note))lines.Add("   "+Clip(entry.Note).Replace("\n","\n   "));
+            }
+            foreach(var todo in Store.Todos(day))lines.Add((todo.done?"☑ ":"☐ ")+todo.title);
+            string memo=Store.Memo(day);
+            if(!string.IsNullOrWhiteSpace(memo))lines.Add("메모: "+Clip(memo));
+            return lines.Count==0?null:day.ToString("M월 d일 (ddd)")+"\n"+string.Join("\n",lines);
+        }
+        void HoverTip(Point p)
+        {
+            string key=null,text=null;
+            int row=LayoutInfo.TodoPanel.Contains(p)?LayoutInfo.TodoAt(p):-1,cell=LayoutInfo.CellAt(p);
+            if(row>=0)
+            {
+                var rows=CalendarRenderer.VisibleTodos(Store);
+                if(todoOffset+row<rows.Count)
+                {
+                    var todo=rows[todoOffset+row];key="todo:"+todo.id;
+                    text=(todo.important?"★ ":"")+todo.title+"\n"+(string.IsNullOrEmpty(todo.due)?"기한 없음":"기한 "+todo.due)+(string.IsNullOrWhiteSpace(todo.note)?"":"\n\n"+Clip(todo.note));
+                }
+            }
+            else if(cell>=0){text=DayTip(LayoutInfo.First.AddDays(cell));if(text!=null)key="day:"+LayoutInfo.First.AddDays(cell).ToString("yyyyMMdd");}
+            tipAt=p;
+            if(key==tipKey)return;
+            HideTip();tipKey=key;tipText=text;if(key!=null)tipTimer.Start();
         }
         void FeedChanged()
         {
@@ -245,6 +297,7 @@ namespace SchoolWidget
         {
             if(resourcesClosed||!calendarVisible||LayoutInfo==null)return;
             Point p=new Point(screen.X-Left,screen.Y-Top);
+            if(kind!=0x200||dragHit!=0)HideTip();
             if(dragHit!=0)
             {
                 if(kind==0x200)DragTo(screen);
@@ -256,6 +309,7 @@ namespace SchoolWidget
             if(kind==0x200)
             {
                 if(hover!=index){hover=index;ScheduleRender();}
+                HoverTip(p);
                 uint cursor=LayoutInfo.Move.Contains(p)&&!cfg.Locked?32646u:
                     LayoutInfo.TodoPanel.Contains(p)||LayoutInfo.Timetable.Contains(p)||LayoutInfo.Prev.Contains(p)||LayoutInfo.Next.Contains(p)||LayoutInfo.Today.Contains(p)||LayoutInfo.Details.Contains(p)||LayoutInfo.Menu.Contains(p)?32649u:32512u;
                 dock.SetInteraction(cfg.Locked,cursor);return;
@@ -380,7 +434,7 @@ namespace SchoolWidget
         }
         public void DisposeTray()
         {
-            if(resourcesClosed)return;CloseMemo();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Tasks.Dispose();Store.Changed-=QueueRender;
+            if(resourcesClosed)return;CloseMemo();HideTip();tipTimer.Dispose();tip.Dispose();resourcesClosed=true;redraw.Stop();midnight.Stop();syncTimer.Stop();redraw.Dispose();midnight.Dispose();syncTimer.Dispose();Feed.Changed-=FeedChanged;Feed.Dispose();Tasks.Dispose();Store.Changed-=QueueRender;
             if(details!=null&&!details.IsDisposed)details.Close();dock.Dispose();tray.Visible=false;tray.Dispose();menu.Dispose();
             if(dayMenu!=null)dayMenu.Dispose();
             if(frame!=null){frame.Dispose();frame=null;}
